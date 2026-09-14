@@ -1,6 +1,6 @@
 # app.py — Simulador Score de Venda Urba (versão completa)
 
-```python
+
 import streamlit as st
 from datetime import date, datetime
 import pdfplumber
@@ -384,4 +384,4 @@ with st.expander("🔍 Ver detalhamento das notas por variável"):
     })
     df.loc[len(df)] = ["TOTAL", 27, "—", score_total]
     st.dataframe(df, use_container_width=True)
-```
+
