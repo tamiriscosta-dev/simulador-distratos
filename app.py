@@ -753,6 +753,7 @@ with c1:
         key="empreendimento_v71",
     )
 
+# A partir daqui, Unidade e Tipo de Produto usam SOMENTE o empreendimento.
 if empreendimento:
     cad_emp = cadastro[
         cadastro["Empreendimento"].astype(str).str.strip()
@@ -761,6 +762,9 @@ if empreendimento:
 else:
     cad_emp = cadastro.iloc[0:0].copy()
 
+# ------------------------------------------------------------
+# UNIDADE: lista vinculada ao empreendimento selecionado.
+# ------------------------------------------------------------
 with c2:
     unidades = sorted(
         cad_emp["Unidade"]
@@ -781,35 +785,29 @@ with c2:
         key="unidade_v71",
     )
 
+# ------------------------------------------------------------
+# TIPO DE PRODUTO: vinculado EXCLUSIVAMENTE ao empreendimento.
+# Não depende da unidade selecionada.
+# ------------------------------------------------------------
 with c3:
-    tipos = (
-        cad_emp["Tipo_Produto"]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .loc[lambda x: x.ne("")]
-        .unique()
-        .tolist()
-        if empreendimento
-        else []
-    )
+    tipo_produto = ""
 
-    tipo_produto = tipos[0] if len(tipos) == 1 else ""
-
-    # Se houver tipo por unidade, usa o tipo da unidade selecionada.
-    if unidade and "Tipo_Produto" in cad_emp.columns:
-        tipo_unidade = (
-            cad_emp[
-                cad_emp["Unidade"].astype(str).str.strip()
-                == str(unidade).strip()
-            ]["Tipo_Produto"]
+    if empreendimento and not cad_emp.empty:
+        tipos_emp = (
+            cad_emp["Tipo_Produto"]
             .dropna()
             .astype(str)
             .str.strip()
         )
-        tipo_unidade = [x for x in tipo_unidade.unique().tolist() if x]
-        if tipo_unidade:
-            tipo_produto = tipo_unidade[0]
+        tipos_emp = [
+            x for x in tipos_emp.unique().tolist()
+            if x
+        ]
+
+        # Regra oficial:
+        # o empreendimento possui o Tipo de Produto associado no cadastro.
+        if tipos_emp:
+            tipo_produto = tipos_emp[0]
 
     st.text_input(
         "Tipo de Produto",
