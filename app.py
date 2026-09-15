@@ -737,7 +737,7 @@ if cadastro.empty:
     st.error(
         "Não consegui carregar a relação de empreendimentos e unidades. "
         "Confirme se o arquivo Excel está no mesmo repositório do app.py "
-        "e contém as colunas Empreendimento e Unidade."
+        "e contém Empreendimento, Unidade e Tipo_Produto."
     )
     if erro_cadastro:
         with st.expander("Detalhes técnicos do cadastro"):
@@ -746,24 +746,16 @@ if cadastro.empty:
 c1, c2, c3 = st.columns(3)
 
 empreendimentos = sorted(
-    cadastro["Empreendimento"]
-    .dropna()
-    .astype(str)
-    .str.strip()
-    .loc[lambda x: x.ne("")]
-    .unique()
-    .tolist()
+    cadastro["Empreendimento"].dropna().astype(str).str.strip()
+    .loc[lambda x: x.ne("")].unique().tolist()
 )
 
 with c1:
     empreendimento = st.selectbox(
-        "Empreendimento *",
-        [""] + empreendimentos,
-        index=0,
-        key="empreendimento_v71",
+        "Empreendimento *", [""] + empreendimentos,
+        index=0, key="empreendimento_v72"
     )
 
-# A partir daqui, Unidade e Tipo de Produto usam SOMENTE o empreendimento.
 if empreendimento:
     cad_emp = cadastro[
         cadastro["Empreendimento"].astype(str).str.strip()
@@ -772,59 +764,34 @@ if empreendimento:
 else:
     cad_emp = cadastro.iloc[0:0].copy()
 
-# ------------------------------------------------------------
-# UNIDADE: lista vinculada ao empreendimento selecionado.
-# ------------------------------------------------------------
 with c2:
     unidades = sorted(
-        cad_emp["Unidade"]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .loc[lambda x: x.ne("")]
-        .unique()
-        .tolist(),
+        cad_emp["Unidade"].dropna().astype(str).str.strip()
+        .loc[lambda x: x.ne("")].unique().tolist(),
         key=lambda x: x.zfill(30),
     )
-
     unidade = st.selectbox(
-        "Unidade *",
-        [""] + unidades,
-        index=0,
-        disabled=not bool(empreendimento),
-        key="unidade_v71",
+        "Unidade *", [""] + unidades,
+        index=0, disabled=not bool(empreendimento),
+        key="unidade_v72"
     )
 
-# ------------------------------------------------------------
-# TIPO DE PRODUTO: vinculado EXCLUSIVAMENTE ao empreendimento.
-# Não depende da unidade selecionada.
-# ------------------------------------------------------------
+# REGRA: Tipo_Produto é amarrado ao Empreendimento.
+tipo_produto = ""
+if empreendimento and not cad_emp.empty and "Tipo_Produto" in cad_emp.columns:
+    serie_tipo = cad_emp["Tipo_Produto"].fillna("").astype(str).str.strip()
+    serie_tipo = serie_tipo[serie_tipo.ne("")]
+    if not serie_tipo.empty:
+        tipo_produto = serie_tipo.iloc[0]
+
 with c3:
-    tipo_produto = ""
-
-    if empreendimento and not cad_emp.empty:
-        tipos_emp = (
-            cad_emp["Tipo_Produto"]
-            .dropna()
-            .astype(str)
-            .str.strip()
-        )
-        tipos_emp = [
-            x for x in tipos_emp.unique().tolist()
-            if x
-        ]
-
-        # Regra oficial:
-        # o empreendimento possui o Tipo de Produto associado no cadastro.
-        if tipos_emp:
-            tipo_produto = tipos_emp[0]
-
-    st.text_input(
-        "Tipo de Produto",
-        value=tipo_produto,
-        disabled=True,
-        key="tipo_produto_v71",
-    )
+    st.markdown("**Tipo de Produto**")
+    if tipo_produto:
+        st.success(tipo_produto)
+    elif empreendimento:
+        st.warning("Tipo de Produto não encontrado no cadastro.")
+    else:
+        st.info("Selecione o empreendimento.")
 
 st.divider()
 
@@ -1315,7 +1282,7 @@ else:
 # ============================================================
 st.divider()
 st.caption(
-    "V7.1 — Projeto Defensores do Contrato | "
+    "V7.2 — Projeto Defensores do Contrato | "
     "Score SPC exclusivamente do proponente | Histórico administrativo do piloto"
 )
 
