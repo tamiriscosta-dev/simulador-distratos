@@ -1,6 +1,6 @@
-# app.py — V7.1
+# app.py — V7
 # Simulador de Score de Vendas — Projeto Defensores do Contrato
-# V7.1: score exclusivamente do proponente + horário de Brasília + histórico por usuário
+# V7: score exclusivamente do proponente + horário de Brasília + histórico por usuário
 # + leitura robusta do SPC + cadastro por empreendimentos.xlsx.
 
 import io
@@ -549,7 +549,7 @@ def montar_cenarios(
 
 def obter_usuario_autenticado():
     """
-    V7.1: usa st.user somente quando a autenticação OIDC do app disponibiliza
+    V7: usa st.user somente quando a autenticação OIDC do app disponibiliza
     a identidade ao código. A lista de viewers do Community Cloud, sozinha,
     controla acesso ao app, mas não deve ser usada como fonte do e-mail aqui.
     """
@@ -584,7 +584,7 @@ usuario_atual = obter_usuario_autenticado()
 def salvar_historico(dados):
     arquivo = "historico.csv"
 
-    # Horário oficial da V7.1: Brasília.
+    # Horário oficial da V7: Brasília.
     dados = dict(dados)
     dados["Data"] = datetime.now(TIMEZONE_BRASILIA).strftime("%d/%m/%Y %H:%M:%S")
     dados["Usuario_Email"] = usuario_atual["email"]
@@ -607,7 +607,7 @@ if "resultado" not in st.session_state:
 # ============================================================
 # 1. EMPREENDIMENTO
 # ============================================================
-st.subheader("🏗️ Dados do Empreendimento")
+st.subheader("🏗 Dados do Empreendimento")
 
 c1, c2, c3 = st.columns(3)
 
@@ -812,7 +812,7 @@ for i in range(int(qtd_adicionais)):
         # Sua renda presumida participa da composição da renda.
         rendas_adicionais.append(renda_add)
 
-# REGRA OFICIAL V7.1:
+# REGRA OFICIAL V7:
 # O score utilizado na análise é EXCLUSIVAMENTE o score do PROPONENTE.
 # Os clientes adicionais participam somente da composição da renda.
 score_analise = score_proponente
@@ -1056,162 +1056,231 @@ if st.session_state.resultado:
             )
 
     # ========================================================
-    # 7. HISTÓRICO — PILOTO V7.1
+    # 7. HISTÓRICO — só salva quando confirmado
+    # ========================================================
     st.divider()
     st.subheader("💾 Histórico")
-    st.caption(
-        "O e-mail identifica o vendedor. Durante o piloto, "
-        "somente o administrador consulta o histórico."
-    )
+    st.caption("Salve somente propostas/simulações que devam compor o histórico.")
 
-    if not email_valido(vendedor_email):
-        st.warning("Informe um e-mail válido do vendedor para salvar.")
-    elif st.button(
+    if not usuario_atual["identificado"]:
+        st.warning(
+            "Histórico individual bloqueado: o app ainda não recebeu o e-mail "
+            "do usuário autenticado. A lista de viewers controla quem entra, "
+            "mas para separar históricos por usuário é necessário configurar "
+            "autenticação OIDC no Streamlit."
+        )
+
+    if st.button(
         "✅ CONFIRMAR E SALVAR NO HISTÓRICO",
         type="primary",
-        key="salvar_v71",
+        disabled=not usuario_atual["identificado"],
     ):
         registro = {
             "Data": datetime.now(TIMEZONE_BRASILIA).strftime("%d/%m/%Y %H:%M:%S"),
-            "Vendedor_Email": vendedor_email,
             "Empreendimento": d["empreendimento"],
             "Unidade": d["unidade"],
             "Tipo Produto": d["tipo_produto"],
             "Idade": d["idade"],
+            "Faixa Etária": d["faixa_idade"],
             "Estado Civil": d["estado_civil"],
             "Score Proponente": d["score_proponente"],
-            "Renda Proponente": d["renda_proponente"],
             "Renda Total": d["renda_total"],
-            "Ato": d["ato"],
-            "% Ato": d["pct_ato"],
+            "Ato Urba": d["ato_urba"],
             "Valor Proposta": d["valor_proposta"],
+            "% Ato": round(d["perc_ato"], 2),
             "Plano": d["plano"],
-            "Primeira Mensal": d["primeira_mensal"],
-            "% Comprometimento": d["comprometimento"],
+            "1ª Mensal": d["primeira_mensal"],
+            "% Comprometimento": round(d["perc_comp"], 2),
             "Score Final": d["score_final"],
             "Classificação": d["classificacao"],
         }
-        arquivo = "historico.csv"
-        novo = pd.DataFrame([registro])
-        if os.path.exists(arquivo):
-            antigo = pd.read_csv(arquivo)
-            novo = pd.concat([antigo, novo], ignore_index=True)
-        novo.to_csv(arquivo, index=False, encoding="utf-8-sig")
-        st.success("Simulação salva no histórico temporário do piloto.")
+        salvar_historico(registro)
+        st.success("Simulação salva no histórico.")
 
 
 # ============================================================
-# 8. HISTÓRICO ADMINISTRATIVO — PILOTO V7.1
+# 8. VISUALIZAÇÃO DO HISTÓRICO — V7
 # ============================================================
 st.divider()
-st.subheader("📂 Histórico de Simulações")
 
-if not st.session_state.admin_v71:
-    st.info(
-        "Histórico restrito ao administrador. "
-        "Use 🔐 Administração na barra lateral para acessar."
-    )
-elif not os.path.exists("historico.csv"):
-    st.info("Nenhuma simulação oficial registrada.")
-else:
-    hist = pd.read_csv("historico.csv")
+with st.expander("📂 Ver Histórico de Simulações Salvas"):
+    if not usuario_atual["identificado"]:
+        st.info(
+            "O histórico está oculto até que a identidade individual do usuário "
+            "esteja disponível ao app."
+        )
 
-    if hist.empty:
-        st.info("Nenhuma simulação oficial registrada.")
+    elif os.path.exists("historico.csv"):
+        hist = pd.read_csv("historico.csv")
+
+        # Garante compatibilidade com arquivo criado pela V7.
+        if "Usuario_Email" not in hist.columns:
+            st.warning(
+                "O histórico encontrado é de uma versão anterior e não possui "
+                "identificação de usuário. Para iniciar o uso oficial, exclua "
+                "o historico.csv de testes."
+            )
+        else:
+            hist["Usuario_Email"] = (
+                hist["Usuario_Email"].fillna("").astype(str).str.lower()
+            )
+
+            if usuario_atual["administrador"]:
+                st.success("Visão administrativa — todos os usuários")
+
+                f1, f2, f3 = st.columns(3)
+
+                usuarios = sorted(
+                    [x for x in hist["Usuario_Email"].unique().tolist() if x]
+                )
+                empreendimentos_hist = sorted(
+                    [x for x in hist["Empreendimento"].dropna().astype(str).unique().tolist() if x]
+                )
+                classificacoes = sorted(
+                    [x for x in hist["Classificação"].dropna().astype(str).unique().tolist() if x]
+                ) if "Classificação" in hist.columns else []
+
+                with f1:
+                    filtro_usuario = st.selectbox(
+                        "Usuário",
+                        ["TODOS"] + usuarios,
+                        key="hist_usuario_v7",
+                    )
+                with f2:
+                    filtro_emp = st.selectbox(
+                        "Empreendimento",
+                        ["TODOS"] + empreendimentos_hist,
+                        key="hist_emp_v7",
+                    )
+                with f3:
+                    filtro_class = st.selectbox(
+                        "Classificação",
+                        ["TODAS"] + classificacoes,
+                        key="hist_class_v7",
+                    )
+
+                hist_exibicao = hist.copy()
+
+                if filtro_usuario != "TODOS":
+                    hist_exibicao = hist_exibicao[
+                        hist_exibicao["Usuario_Email"] == filtro_usuario
+                    ]
+                if filtro_emp != "TODOS":
+                    hist_exibicao = hist_exibicao[
+                        hist_exibicao["Empreendimento"].astype(str) == filtro_emp
+                    ]
+                if (
+                    filtro_class != "TODAS"
+                    and "Classificação" in hist_exibicao.columns
+                ):
+                    hist_exibicao = hist_exibicao[
+                        hist_exibicao["Classificação"].astype(str) == filtro_class
+                    ]
+
+                st.dataframe(
+                    hist_exibicao,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                st.download_button(
+                    "⬇ Baixar histórico consolidado",
+                    hist_exibicao.to_csv(index=False).encode("utf-8-sig"),
+                    "historico_simulacoes.csv",
+                    "text/csv",
+                )
+
+            else:
+                hist_usuario = hist[
+                    hist["Usuario_Email"] == usuario_atual["email"]
+                ].copy()
+
+                st.caption(
+                    f"Exibindo somente as simulações de **{usuario_atual['email']}**."
+                )
+
+                if hist_usuario.empty:
+                    st.info("Você ainda não possui simulações salvas.")
+                else:
+                    st.dataframe(
+                        hist_usuario,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                    st.download_button(
+                        "⬇ Baixar meu histórico",
+                        hist_usuario.to_csv(index=False).encode("utf-8-sig"),
+                        "meu_historico_simulacoes.csv",
+                        "text/csv",
+                    )
     else:
-        st.success("Visão administrativa — histórico consolidado")
+        st.info("Nenhuma simulação salva.")
 
-        if "Vendedor_Email" not in hist.columns:
-            hist["Vendedor_Email"] = ""
-
-        f1, f2, f3 = st.columns(3)
-
-        with f1:
-            vendedores = sorted(
-                [x for x in hist["Vendedor_Email"].fillna("").astype(str).unique() if x]
-            )
-            filtro_vendedor = st.selectbox(
-                "Vendedor", ["TODOS"] + vendedores, key="hist_vendedor_v71"
-            )
-
-        with f2:
-            emps = sorted(
-                [x for x in hist["Empreendimento"].fillna("").astype(str).unique() if x]
-            )
-            filtro_emp = st.selectbox(
-                "Empreendimento", ["TODOS"] + emps, key="hist_emp_v71"
-            )
-
-        with f3:
-            classes = sorted(
-                [x for x in hist["Classificação"].fillna("").astype(str).unique() if x]
-            )
-            filtro_class = st.selectbox(
-                "Classificação", ["TODAS"] + classes, key="hist_class_v71"
-            )
-
-        exibicao = hist.copy()
-        if filtro_vendedor != "TODOS":
-            exibicao = exibicao[exibicao["Vendedor_Email"] == filtro_vendedor]
-        if filtro_emp != "TODOS":
-            exibicao = exibicao[exibicao["Empreendimento"].astype(str) == filtro_emp]
-        if filtro_class != "TODAS":
-            exibicao = exibicao[exibicao["Classificação"].astype(str) == filtro_class]
-
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Simulações", len(exibicao))
-        k2.metric(
-            "Baixo Risco",
-            int(exibicao["Classificação"].astype(str).str.contains("BAIXO", na=False).sum()),
-        )
-        k3.metric(
-            "Moderado",
-            int(exibicao["Classificação"].astype(str).str.contains("MODERADO", na=False).sum()),
-        )
-        k4.metric(
-            "Alto Risco",
-            int(exibicao["Classificação"].astype(str).str.contains("ALTO", na=False).sum()),
-        )
-
-        st.dataframe(exibicao, use_container_width=True, hide_index=True)
-
-        st.download_button(
-            "⬇ BAIXAR HISTÓRICO PARA BACKUP NO ONEDRIVE",
-            exibicao.to_csv(index=False).encode("utf-8-sig"),
-            f"historico_score_vendas_{datetime.now(TIMEZONE_BRASILIA).strftime('%Y%m%d_%H%M')}.csv",
-            "text/csv",
-            use_container_width=True,
-        )
-
-        st.warning(
-            "⚠️ O histórico no servidor é temporário. "
-            "Após baixar, mantenha a cópia no OneDrive corporativo."
-        )
-
-
-st.divider()
-st.caption(
-    "V7.1 — Projeto Defensores do Contrato | "
-    "Score 27–130 | Score SPC exclusivamente do proponente"
-)
 
 # ============================================================
-# CONFIGURAÇÃO DO STREAMLIT CLOUD — PILOTO V7.1
+# 9. STATUS DE ACESSO — V7
 # ============================================================
-# Em App > Settings > Secrets, adicione:
+with st.sidebar:
+    st.subheader("👤 Usuário")
+
+    if usuario_atual["identificado"]:
+        st.success(usuario_atual["nome"] or usuario_atual["email"])
+        st.caption(usuario_atual["email"])
+        if usuario_atual["administrador"]:
+            st.info("Perfil: ADMINISTRADOR")
+        else:
+            st.caption("Perfil: USUÁRIO")
+    else:
+        st.warning("Identidade individual ainda não configurada.")
+        st.caption(
+            "A lista de viewers continua protegendo o acesso ao app, "
+            "mas não identifica o e-mail para o código."
+        )
+
+
+# ============================================================
+# NOTAS DE IMPLANTAÇÃO — V7
+# ============================================================
+# 1) GitHub:
+#    app.py
+#    empreendimentos.xlsx
+#    requirements.txt
 #
-# [admin]
-# senha = "Denfendores_do_Contrato"
+# 2) requirements.txt:
+#    streamlit>=1.42
+#    pandas
+#    openpyxl
+#    pdfplumber
 #
-#DB_USERNAME = "admin"
-#DB_TOKEN= "Denfendores_do_Contrato"
-# Não coloque a senha no GitHub.
+# 3) Para começar o uso oficial sem os testes:
+#    exclua historico.csv do repositório antes da publicação oficial.
 #
-# requirements.txt:
-# streamlit
-# pandas
-# openpyxl
-# pdfplumber
+# 4) Score:
+#    27–60  = ALTO RISCO
+#    61–89  = RISCO MODERADO
+#    90–130 = BAIXO RISCO
 #
-# O historico.csv é temporário. Faça backups periódicos pelo botão
-# administrativo e salve-os no OneDrive corporativo.
+# 5) Score SPC:
+#    somente o PROPONENTE participa do cálculo.
+#    Clientes adicionais entram somente na composição da renda.
+#
+# 6) Horário:
+#    America/Sao_Paulo.
+#
+# 7) Histórico por usuário:
+#    a lista "Only specific people can view this app" do Community Cloud
+#    controla quem abre o app, mas nas versões atuais não fornece, sozinha,
+#    o e-mail do viewer ao código via st.user.
+#    Para habilitar a segregação por e-mail, configure autenticação OIDC
+#    (Microsoft, Google, Okta etc.) nos Secrets do Streamlit.
+#
+# 8) Administrador:
+#    depois de configurar OIDC, inclua o(s) e-mail(s) em ADMINISTRADORES.
+#
+# 9) Segurança:
+#    nunca coloque client_secret/senhas no GitHub.
+#
+# 10) Persistência:
+#    historico.csv continua sendo solução de PILOTO. Para produção
+#    multiusuário, migre o histórico para armazenamento persistente.
