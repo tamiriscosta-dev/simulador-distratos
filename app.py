@@ -25,9 +25,19 @@ def email_valido(email):
 
 
 def obter_senha_admin():
-    """Lê a senha administrativa dos Secrets; nunca do GitHub."""
+    """Lê a senha administrativa dos Secrets do Streamlit."""
     try:
-        return str(st.secrets["admin"]["senha"])
+        # Formato atual do piloto:
+        # DB_TOKEN = "sua_senha"
+        senha = str(st.secrets.get("DB_TOKEN", "")).strip()
+        if senha:
+            return senha
+    except Exception:
+        pass
+
+    # Compatibilidade opcional com o formato estruturado.
+    try:
+        return str(st.secrets["admin"]["senha"]).strip()
     except Exception:
         return ""
 
@@ -1314,8 +1324,7 @@ st.caption(
 # ============================================================
 # Em App > Settings > Secrets:
 #
-# [admin]
-# senha = "ESCOLHA_UMA_SENHA_FORTE"
+# DB_TOKEN = "ESCOLHA_UMA_SENHA_FORTE"
 #
 # Nunca coloque essa senha no GitHub.
 #
