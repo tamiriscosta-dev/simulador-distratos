@@ -1,6 +1,6 @@
-# app.py — V7
+# app.py — V7.1
 # Simulador de Score de Vendas — Projeto Defensores do Contrato
-# V7: score exclusivamente do proponente + horário de Brasília + histórico por usuário
+# V7.1: score exclusivamente do proponente + horário de Brasília + histórico por usuário
 # + leitura robusta do SPC + cadastro por empreendimentos.xlsx.
 
 import io
@@ -13,6 +13,68 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 import pdfplumber
+
+
+# ============================================================
+# PILOTO V7.1 — IDENTIFICAÇÃO DO VENDEDOR E ADMINISTRAÇÃO
+# ============================================================
+def email_valido(email):
+    """Valida somente o formato do e-mail informado no piloto."""
+    email = str(email or "").strip().lower()
+    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email))
+
+
+def obter_senha_admin():
+    """Lê a senha administrativa dos Secrets; nunca do GitHub."""
+    try:
+        return str(st.secrets["admin"]["senha"])
+    except Exception:
+        return ""
+
+
+if "admin_autenticado_v71" not in st.session_state:
+    st.session_state.admin_autenticado_v71 = False
+
+with st.sidebar:
+    st.subheader("👤 Vendedor")
+    vendedor_email = st.text_input(
+        "E-mail do vendedor *",
+        placeholder="nome@empresa.com.br",
+        key="vendedor_email_v71",
+    ).strip().lower()
+
+    if vendedor_email:
+        if email_valido(vendedor_email):
+            st.success("E-mail informado.")
+        else:
+            st.error("Informe um e-mail válido.")
+
+    st.divider()
+    st.subheader("🔐 Administração")
+
+    if not st.session_state.admin_autenticado_v71:
+        senha_digitada = st.text_input(
+            "Senha administrativa",
+            type="password",
+            key="senha_admin_v71",
+        )
+        if st.button("Entrar como administrador", key="login_admin_v71"):
+            senha_correta = obter_senha_admin()
+            if not senha_correta:
+                st.error(
+                    "A senha administrativa ainda não foi configurada "
+                    "nos Secrets do Streamlit."
+                )
+            elif senha_digitada == senha_correta:
+                st.session_state.admin_autenticado_v71 = True
+                st.rerun()
+            else:
+                st.error("Senha administrativa incorreta.")
+    else:
+        st.success("Perfil: ADMINISTRADOR")
+        if st.button("Sair da administração", key="logout_admin_v71"):
+            st.session_state.admin_autenticado_v71 = False
+            st.rerun()
 
 
 # ============================================================
@@ -30,75 +92,127 @@ st.divider()
 
 
 # ============================================================
-# CADASTRO DO PILOTO
+# CADASTRO DE EMPREENDIMENTOS E UNIDADES — V7.1
 # ============================================================
-# IMPORTANTE:
-# O histórico recebido informa que existem 1.583 unidades (quadras 01 a 47),
-# mas não contém, de forma recuperável, a relação completa lote a lote.
-# Para não inventar unidades, a V7 aceita um cadastro externo opcional
-# empreendimentos_unidades.xlsx/csv.
-#
-# Colunas esperadas:
-# Empreendimento | Unidade | Tipo_Produto
-#
-# Enquanto o arquivo não existir, fica disponível o empreendimento piloto
-# e a unidade pode ser informada/pesquisada manualmente.
-
-ARQUIVOS_CADASTRO = [
-    "empreendimentos.xlsx",
-]
+# O app procura primeiro por empreendimentos.xlsx.
+# Se o nome do arquivo variar, procura automaticamente outros .xlsx do
+# repositório e usa o primeiro que contenha Empreendimento e Unidade.
 
 TIMEZONE_BRASILIA = ZoneInfo("America/Sao_Paulo")
 
-# E-mails que terão visão administrativa do histórico.
-# Preencha somente depois de configurar autenticação OIDC no Streamlit.
-ADMINISTRADORES = {
-    # "seu.email@empresa.com.br",
-}
 
-CADASTRO_FALLBACK = pd.DataFrame(
-    [{
-        "Empreendimento": "SMART URBA RESERVA",
-        "Unidade": "",
-        "Tipo_Produto": "SMART",
-    }]
-)
+def _chave_coluna(nome):
+    nome = str(nome or "").strip()
+    nome = unicodedata.normalize("NFKD", nome)
+    nome = "".join(c for c in nome if not unicodedata.combining(c))
+    nome = nome.lower()
+    nome = re.sub(r"[_\-]+", " ", nome)
+    nome = re.sub(r"\s+", " ", nome).strip()
+    return nome
 
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def carregar_cadastro():
-    for arquivo in ARQUIVOS_CADASTRO:
-        if os.path.exists(arquivo):
-            if arquivo.lower().endswith(".xlsx"):
-                df = pd.read_excel(arquivo)
-            else:
-                df = pd.read_csv(arquivo)
+    candidatos = []
 
-            aliases = {
-                "empreendimento": "Empreendimento",
-                "unidade": "Unidade",
-                "tipo de produto": "Tipo_Produto",
-                "tipo_produto": "Tipo_Produto",
-                "tipo produto": "Tipo_Produto",
-            }
-            renomear = {}
-            for c in df.columns:
-                chave = str(c).strip().lower()
-                if chave in aliases:
-                    renomear[c] = aliases[chave]
-            df = df.rename(columns=renomear)
+    # Prioridade absoluta para o arquivo oficial.
+    if os.path.exists("empreendimentos.xlsx"):
+        candidatos.append("empreendimentos.xlsx")
 
-            obrigatorias = {"Empreendimento", "Unidade", "Tipo_Produto"}
-            if obrigatorias.issubset(df.columns):
-                for c in obrigatorias:
-                    df[c] = df[c].fillna("").astype(str).str.strip()
-                return df[list(obrigatorias)].drop_duplicates()
+    # Fallback robusto: detecta qualquer outro Excel do repositório.
+    for nome in sorted(os.listdir(".")):
+        if nome.lower().endswith(".xlsx") and nome not in candidatos:
+            candidatos.append(nome)
 
-    return CADASTRO_FALLBACK.copy()
+    erros = []
+
+    for arquivo in candidatos:
+        try:
+            excel = pd.ExcelFile(arquivo, engine="openpyxl")
+
+            # Procura uma aba que tenha as colunas necessárias.
+            for aba in excel.sheet_names:
+                df = pd.read_excel(
+                    arquivo,
+                    sheet_name=aba,
+                    engine="openpyxl",
+                )
+
+                mapa = {}
+                for col in df.columns:
+                    chave = _chave_coluna(col)
+
+                    if chave in {
+                        "empreendimento",
+                        "empreendimentos",
+                        "nome empreendimento",
+                    }:
+                        mapa[col] = "Empreendimento"
+
+                    elif chave in {
+                        "unidade",
+                        "unidades",
+                        "quadra lote",
+                        "quadra/lote",
+                    }:
+                        mapa[col] = "Unidade"
+
+                    elif chave in {
+                        "tipo produto",
+                        "tipo de produto",
+                        "produto",
+                    }:
+                        mapa[col] = "Tipo_Produto"
+
+                df = df.rename(columns=mapa)
+
+                # Empreendimento e Unidade são obrigatórios.
+                if {"Empreendimento", "Unidade"}.issubset(df.columns):
+                    if "Tipo_Produto" not in df.columns:
+                        df["Tipo_Produto"] = ""
+
+                    df = df[
+                        ["Empreendimento", "Unidade", "Tipo_Produto"]
+                    ].copy()
+
+                    # Mantém unidades numéricas sem transformar 1 em "1.0".
+                    def texto_limpo(valor):
+                        if pd.isna(valor):
+                            return ""
+                        if isinstance(valor, float) and valor.is_integer():
+                            return str(int(valor))
+                        return str(valor).strip()
+
+                    for col in [
+                        "Empreendimento",
+                        "Unidade",
+                        "Tipo_Produto",
+                    ]:
+                        df[col] = df[col].apply(texto_limpo)
+
+                    df = df[
+                        (df["Empreendimento"] != "")
+                        & (df["Unidade"] != "")
+                    ].drop_duplicates()
+
+                    if not df.empty:
+                        return df, arquivo, aba, None
+
+        except Exception as erro:
+            erros.append(f"{arquivo}: {erro}")
+
+    detalhe = " | ".join(erros) if erros else "Nenhum Excel compatível encontrado."
+    return (
+        pd.DataFrame(
+            columns=["Empreendimento", "Unidade", "Tipo_Produto"]
+        ),
+        None,
+        None,
+        detalhe,
+    )
 
 
-cadastro = carregar_cadastro()
-
+cadastro, arquivo_cadastro, aba_cadastro, erro_cadastro = carregar_cadastro()
 
 # ============================================================
 # PARÂMETROS DO SCORE
@@ -549,7 +663,7 @@ def montar_cenarios(
 
 def obter_usuario_autenticado():
     """
-    V7: usa st.user somente quando a autenticação OIDC do app disponibiliza
+    V7.1: usa st.user somente quando a autenticação OIDC do app disponibiliza
     a identidade ao código. A lista de viewers do Community Cloud, sozinha,
     controla acesso ao app, mas não deve ser usada como fonte do e-mail aqui.
     """
@@ -584,7 +698,7 @@ usuario_atual = obter_usuario_autenticado()
 def salvar_historico(dados):
     arquivo = "historico.csv"
 
-    # Horário oficial da V7: Brasília.
+    # Horário oficial da V7.1: Brasília.
     dados = dict(dados)
     dados["Data"] = datetime.now(TIMEZONE_BRASILIA).strftime("%d/%m/%Y %H:%M:%S")
     dados["Usuario_Email"] = usuario_atual["email"]
@@ -609,10 +723,26 @@ if "resultado" not in st.session_state:
 # ============================================================
 st.subheader("🏗 Dados do Empreendimento")
 
+if cadastro.empty:
+    st.error(
+        "Não consegui carregar a relação de empreendimentos e unidades. "
+        "Confirme se o arquivo Excel está no mesmo repositório do app.py "
+        "e contém as colunas Empreendimento e Unidade."
+    )
+    if erro_cadastro:
+        with st.expander("Detalhes técnicos do cadastro"):
+            st.code(erro_cadastro)
+
 c1, c2, c3 = st.columns(3)
 
 empreendimentos = sorted(
-    [x for x in cadastro["Empreendimento"].dropna().unique().tolist() if x]
+    cadastro["Empreendimento"]
+    .dropna()
+    .astype(str)
+    .str.strip()
+    .loc[lambda x: x.ne("")]
+    .unique()
+    .tolist()
 )
 
 with c1:
@@ -620,35 +750,74 @@ with c1:
         "Empreendimento *",
         [""] + empreendimentos,
         index=0,
+        key="empreendimento_v71",
     )
 
-cad_emp = cadastro[cadastro["Empreendimento"] == empreendimento] if empreendimento else cadastro.iloc[0:0]
+if empreendimento:
+    cad_emp = cadastro[
+        cadastro["Empreendimento"].astype(str).str.strip()
+        == str(empreendimento).strip()
+    ].copy()
+else:
+    cad_emp = cadastro.iloc[0:0].copy()
 
 with c2:
-    unidades = sorted([x for x in cad_emp["Unidade"].unique().tolist() if x])
-    if unidades:
-        unidade = st.selectbox("Unidade *", [""] + unidades, index=0)
-    elif empreendimento:
-        unidade = st.text_input(
-            "Unidade *",
-            value="",
-            placeholder="Cadastre a planilha para habilitar a lista completa",
-        )
-    else:
-        unidade = st.selectbox("Unidade *", [""], index=0, disabled=True)
+    unidades = sorted(
+        cad_emp["Unidade"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .loc[lambda x: x.ne("")]
+        .unique()
+        .tolist(),
+        key=lambda x: x.zfill(30),
+    )
+
+    unidade = st.selectbox(
+        "Unidade *",
+        [""] + unidades,
+        index=0,
+        disabled=not bool(empreendimento),
+        key="unidade_v71",
+    )
 
 with c3:
-    if empreendimento:
-        tipos = [x for x in cad_emp["Tipo_Produto"].unique().tolist() if x]
-        tipo_produto = tipos[0] if len(set(tipos)) == 1 else ""
-    else:
-        tipo_produto = ""
-    st.text_input("Tipo de Produto", value=tipo_produto, disabled=True)
+    tipos = (
+        cad_emp["Tipo_Produto"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .loc[lambda x: x.ne("")]
+        .unique()
+        .tolist()
+        if empreendimento
+        else []
+    )
 
-st.caption(
-    "A V7 está preparada para receber novos empreendimentos por "
-    "`empreendimentos_unidades.xlsx` sem alterar o código."
-)
+    tipo_produto = tipos[0] if len(tipos) == 1 else ""
+
+    # Se houver tipo por unidade, usa o tipo da unidade selecionada.
+    if unidade and "Tipo_Produto" in cad_emp.columns:
+        tipo_unidade = (
+            cad_emp[
+                cad_emp["Unidade"].astype(str).str.strip()
+                == str(unidade).strip()
+            ]["Tipo_Produto"]
+            .dropna()
+            .astype(str)
+            .str.strip()
+        )
+        tipo_unidade = [x for x in tipo_unidade.unique().tolist() if x]
+        if tipo_unidade:
+            tipo_produto = tipo_unidade[0]
+
+    st.text_input(
+        "Tipo de Produto",
+        value=tipo_produto,
+        disabled=True,
+        key="tipo_produto_v71",
+    )
+
 st.divider()
 
 
@@ -812,7 +981,7 @@ for i in range(int(qtd_adicionais)):
         # Sua renda presumida participa da composição da renda.
         rendas_adicionais.append(renda_add)
 
-# REGRA OFICIAL V7:
+# REGRA OFICIAL V7.1:
 # O score utilizado na análise é EXCLUSIVAMENTE o score do PROPONENTE.
 # Os clientes adicionais participam somente da composição da renda.
 score_analise = score_proponente
@@ -963,324 +1132,202 @@ if st.button(
 # ============================================================
 # 6. RESULTADO E ESTRATÉGIA
 # ============================================================
-if st.session_state.resultado:
-    d = st.session_state.resultado
-    st.divider()
-    st.subheader("📊 Resultado")
+# 7. HISTÓRICO — PILOTO V7.1
+# ============================================================
+if st.session_state.get("resultado_v7"):
+    d = st.session_state["resultado_v7"]
 
-    r1, r2 = st.columns([1, 2])
-
-    with r1:
-        st.metric("Score Final", f"{d['score_final']} / 130")
-        if d["cor"] == "green":
-            st.success(f"### {d['classificacao']}")
-        elif d["cor"] == "orange":
-            st.warning(f"### {d['classificacao']}")
-        else:
-            st.error(f"### {d['classificacao']}")
-
-    with r2:
-        labels = {
-            "score_credito": "Score de Crédito",
-            "ato": "% do Ato",
-            "comprometimento_renda": "Comprometimento de Renda",
-            "faixa_renda": "Faixa de Renda",
-            "plano": "Plano",
-            "tipo_produto": "Tipo de Produto",
-            "idade": "Faixa Etária",
-            "estado_civil": "Estado Civil",
-        }
-        max_nota = {
-            "score_credito": 5,
-            "ato": 5,
-            "comprometimento_renda": 5,
-            "faixa_renda": 5,
-            "plano": 5,
-            "tipo_produto": 4,
-            "idade": 5,
-            "estado_civil": 3,
-        }
-
-        detalhes = []
-        for var, peso in PESOS.items():
-            nota = d["notas"][var]
-            detalhes.append({
-                "Variável": labels[var],
-                "Nota": f"{nota}/{max_nota[var]}",
-                "Peso": peso,
-                "Pontos": nota * peso,
-                "Máximo": max_nota[var] * peso,
-            })
-
-        st.dataframe(
-            pd.DataFrame(detalhes),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    if d["classificacao"] != "🟢 BAIXO RISCO":
-        st.divider()
-        st.subheader("💡 Estratégias de Estruturação da Venda")
-
-        falta_mod = max(0, LIMITE_MODERADO - d["score_final"])
-        falta_baixo = max(0, LIMITE_BAIXO - d["score_final"])
-
-        a, b = st.columns(2)
-        a.metric("Pontos para Risco Moderado", f"+{falta_mod}")
-        b.metric("Pontos para Baixo Risco", f"+{falta_baixo}")
-
-        cenarios = montar_cenarios(
-            score_atual=d["score_final"],
-            notas=d["notas"],
-            renda_total=d["renda_total"],
-            mensal=d["primeira_mensal"],
-            ato=d["ato_urba"],
-            valor_proposta=d["valor_proposta"],
-            plano=d["plano"],
-        )
-
-        if cenarios:
-            df_cenarios = pd.DataFrame(cenarios)
-            df_cenarios["Ganho"] = df_cenarios["Ganho"].map(lambda x: f"+{x}")
-            df_cenarios["NovoScore"] = df_cenarios["NovoScore"].map(lambda x: f"{x}")
-            st.dataframe(
-                df_cenarios[
-                    ["Variável", "Ajuste", "Ganho", "NovoScore", "NovaClassificacao"]
-                ].head(12),
-                use_container_width=True,
-                hide_index=True,
-            )
-            st.caption(
-                "As sugestões são simulações contrafactuais. A V7 não recomenda "
-                "alterar idade, estado civil ou o score cadastral do cliente."
-            )
-
-    # ========================================================
-    # 7. HISTÓRICO — só salva quando confirmado
-    # ========================================================
     st.divider()
     st.subheader("💾 Histórico")
-    st.caption("Salve somente propostas/simulações que devam compor o histórico.")
+    st.caption(
+        "O e-mail identifica o vendedor. Durante o piloto, "
+        "somente o administrador consulta o histórico."
+    )
 
-    if not usuario_atual["identificado"]:
-        st.warning(
-            "Histórico individual bloqueado: o app ainda não recebeu o e-mail "
-            "do usuário autenticado. A lista de viewers controla quem entra, "
-            "mas para separar históricos por usuário é necessário configurar "
-            "autenticação OIDC no Streamlit."
-        )
-
-    if st.button(
+    if not email_valido(vendedor_email):
+        st.warning("Informe um e-mail válido do vendedor para salvar.")
+    elif st.button(
         "✅ CONFIRMAR E SALVAR NO HISTÓRICO",
         type="primary",
-        disabled=not usuario_atual["identificado"],
+        key="salvar_historico_v71",
     ):
         registro = {
-            "Data": datetime.now(TIMEZONE_BRASILIA).strftime("%d/%m/%Y %H:%M:%S"),
-            "Empreendimento": d["empreendimento"],
-            "Unidade": d["unidade"],
-            "Tipo Produto": d["tipo_produto"],
-            "Idade": d["idade"],
-            "Faixa Etária": d["faixa_idade"],
-            "Estado Civil": d["estado_civil"],
-            "Score Proponente": d["score_proponente"],
-            "Renda Total": d["renda_total"],
-            "Ato Urba": d["ato_urba"],
-            "Valor Proposta": d["valor_proposta"],
-            "% Ato": round(d["perc_ato"], 2),
-            "Plano": d["plano"],
-            "1ª Mensal": d["primeira_mensal"],
-            "% Comprometimento": round(d["perc_comp"], 2),
-            "Score Final": d["score_final"],
-            "Classificação": d["classificacao"],
+            "Data_Hora": datetime.now(TIMEZONE_BRASILIA).strftime("%d/%m/%Y %H:%M:%S"),
+            "Vendedor_Email": vendedor_email,
+            "Empreendimento": d.get("empreendimento", ""),
+            "Unidade": d.get("unidade", ""),
+            "Tipo_Produto": d.get("tipo_produto", ""),
+            "Idade": d.get("idade", ""),
+            "Faixa_Etaria": d.get("faixa_idade", ""),
+            "Estado_Civil": d.get("estado_civil", ""),
+            "Score_Proponente": d.get("score_proponente", ""),
+            "Renda_Proponente": d.get("renda_proponente", 0),
+            "Renda_Total": d.get("renda_total", 0),
+            "Ato_Urba": d.get("ato", 0),
+            "Percentual_Ato": d.get("pct_ato", 0),
+            "Valor_Proposta": d.get("valor_proposta", 0),
+            "Plano": d.get("plano", ""),
+            "Primeira_Mensal": d.get("primeira_mensal", 0),
+            "Percentual_Comprometimento": d.get("comprometimento", 0),
+            "Score_Final": d.get("score_final", 0),
+            "Classificacao": d.get("classificacao", ""),
         }
-        salvar_historico(registro)
-        st.success("Simulação salva no histórico.")
+
+        arquivo = "historico.csv"
+        novo = pd.DataFrame([registro])
+
+        if os.path.exists(arquivo):
+            try:
+                antigo = pd.read_csv(arquivo)
+                novo = pd.concat([antigo, novo], ignore_index=True)
+            except Exception:
+                pass
+
+        novo.to_csv(arquivo, index=False, encoding="utf-8-sig")
+        st.success("Simulação salva no histórico temporário do piloto.")
 
 
 # ============================================================
-# 8. VISUALIZAÇÃO DO HISTÓRICO — V7
+# 8. HISTÓRICO ADMINISTRATIVO — PILOTO V7.1
 # ============================================================
 st.divider()
+st.subheader("📂 Histórico de Simulações")
 
-with st.expander("📂 Ver Histórico de Simulações Salvas"):
-    if not usuario_atual["identificado"]:
-        st.info(
-            "O histórico está oculto até que a identidade individual do usuário "
-            "esteja disponível ao app."
-        )
-
-    elif os.path.exists("historico.csv"):
+if not st.session_state.admin_autenticado_v71:
+    st.info(
+        "O histórico é restrito ao administrador. "
+        "Use a área 🔐 Administração na barra lateral."
+    )
+elif not os.path.exists("historico.csv"):
+    st.info("Nenhuma simulação oficial registrada.")
+else:
+    try:
         hist = pd.read_csv("historico.csv")
+    except Exception as erro:
+        hist = pd.DataFrame()
+        st.error(f"Não foi possível ler o histórico: {erro}")
 
-        # Garante compatibilidade com arquivo criado pela V7.
-        if "Usuario_Email" not in hist.columns:
-            st.warning(
-                "O histórico encontrado é de uma versão anterior e não possui "
-                "identificação de usuário. Para iniciar o uso oficial, exclua "
-                "o historico.csv de testes."
-            )
-        else:
-            hist["Usuario_Email"] = (
-                hist["Usuario_Email"].fillna("").astype(str).str.lower()
-            )
-
-            if usuario_atual["administrador"]:
-                st.success("Visão administrativa — todos os usuários")
-
-                f1, f2, f3 = st.columns(3)
-
-                usuarios = sorted(
-                    [x for x in hist["Usuario_Email"].unique().tolist() if x]
-                )
-                empreendimentos_hist = sorted(
-                    [x for x in hist["Empreendimento"].dropna().astype(str).unique().tolist() if x]
-                )
-                classificacoes = sorted(
-                    [x for x in hist["Classificação"].dropna().astype(str).unique().tolist() if x]
-                ) if "Classificação" in hist.columns else []
-
-                with f1:
-                    filtro_usuario = st.selectbox(
-                        "Usuário",
-                        ["TODOS"] + usuarios,
-                        key="hist_usuario_v7",
-                    )
-                with f2:
-                    filtro_emp = st.selectbox(
-                        "Empreendimento",
-                        ["TODOS"] + empreendimentos_hist,
-                        key="hist_emp_v7",
-                    )
-                with f3:
-                    filtro_class = st.selectbox(
-                        "Classificação",
-                        ["TODAS"] + classificacoes,
-                        key="hist_class_v7",
-                    )
-
-                hist_exibicao = hist.copy()
-
-                if filtro_usuario != "TODOS":
-                    hist_exibicao = hist_exibicao[
-                        hist_exibicao["Usuario_Email"] == filtro_usuario
-                    ]
-                if filtro_emp != "TODOS":
-                    hist_exibicao = hist_exibicao[
-                        hist_exibicao["Empreendimento"].astype(str) == filtro_emp
-                    ]
-                if (
-                    filtro_class != "TODAS"
-                    and "Classificação" in hist_exibicao.columns
-                ):
-                    hist_exibicao = hist_exibicao[
-                        hist_exibicao["Classificação"].astype(str) == filtro_class
-                    ]
-
-                st.dataframe(
-                    hist_exibicao,
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-                st.download_button(
-                    "⬇ Baixar histórico consolidado",
-                    hist_exibicao.to_csv(index=False).encode("utf-8-sig"),
-                    "historico_simulacoes.csv",
-                    "text/csv",
-                )
-
+    if hist.empty:
+        st.info("Nenhuma simulação oficial registrada.")
+    else:
+        # Compatibilidade com arquivo de teste/versão anterior.
+        if "Vendedor_Email" not in hist.columns:
+            hist["Vendedor_Email"] = ""
+        if "Empreendimento" not in hist.columns:
+            hist["Empreendimento"] = ""
+        if "Classificacao" not in hist.columns:
+            if "Classificação" in hist.columns:
+                hist["Classificacao"] = hist["Classificação"]
             else:
-                hist_usuario = hist[
-                    hist["Usuario_Email"] == usuario_atual["email"]
-                ].copy()
+                hist["Classificacao"] = ""
 
-                st.caption(
-                    f"Exibindo somente as simulações de **{usuario_atual['email']}**."
-                )
+        st.success("Visão administrativa — histórico consolidado")
 
-                if hist_usuario.empty:
-                    st.info("Você ainda não possui simulações salvas.")
-                else:
-                    st.dataframe(
-                        hist_usuario,
-                        use_container_width=True,
-                        hide_index=True,
-                    )
+        c1, c2, c3 = st.columns(3)
 
-                    st.download_button(
-                        "⬇ Baixar meu histórico",
-                        hist_usuario.to_csv(index=False).encode("utf-8-sig"),
-                        "meu_historico_simulacoes.csv",
-                        "text/csv",
-                    )
-    else:
-        st.info("Nenhuma simulação salva.")
+        with c1:
+            vendedores = sorted(
+                x for x in hist["Vendedor_Email"].fillna("").astype(str).unique().tolist()
+                if x
+            )
+            filtro_vendedor = st.selectbox(
+                "Vendedor",
+                ["TODOS"] + vendedores,
+                key="filtro_vendedor_v71",
+            )
 
+        with c2:
+            empreendimentos_hist = sorted(
+                x for x in hist["Empreendimento"].fillna("").astype(str).unique().tolist()
+                if x
+            )
+            filtro_emp = st.selectbox(
+                "Empreendimento",
+                ["TODOS"] + empreendimentos_hist,
+                key="filtro_emp_v71",
+            )
 
-# ============================================================
-# 9. STATUS DE ACESSO — V7
-# ============================================================
-with st.sidebar:
-    st.subheader("👤 Usuário")
+        with c3:
+            classes = sorted(
+                x for x in hist["Classificacao"].fillna("").astype(str).unique().tolist()
+                if x
+            )
+            filtro_class = st.selectbox(
+                "Classificação",
+                ["TODAS"] + classes,
+                key="filtro_class_v71",
+            )
 
-    if usuario_atual["identificado"]:
-        st.success(usuario_atual["nome"] or usuario_atual["email"])
-        st.caption(usuario_atual["email"])
-        if usuario_atual["administrador"]:
-            st.info("Perfil: ADMINISTRADOR")
-        else:
-            st.caption("Perfil: USUÁRIO")
-    else:
-        st.warning("Identidade individual ainda não configurada.")
-        st.caption(
-            "A lista de viewers continua protegendo o acesso ao app, "
-            "mas não identifica o e-mail para o código."
+        exibicao = hist.copy()
+
+        if filtro_vendedor != "TODOS":
+            exibicao = exibicao[exibicao["Vendedor_Email"].astype(str) == filtro_vendedor]
+        if filtro_emp != "TODOS":
+            exibicao = exibicao[exibicao["Empreendimento"].astype(str) == filtro_emp]
+        if filtro_class != "TODAS":
+            exibicao = exibicao[exibicao["Classificacao"].astype(str) == filtro_class]
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Simulações", len(exibicao))
+        k2.metric(
+            "Baixo Risco",
+            int(exibicao["Classificacao"].astype(str).str.contains("BAIXO", na=False).sum()),
+        )
+        k3.metric(
+            "Moderado",
+            int(exibicao["Classificacao"].astype(str).str.contains("MODERADO", na=False).sum()),
+        )
+        k4.metric(
+            "Alto Risco",
+            int(exibicao["Classificacao"].astype(str).str.contains("ALTO", na=False).sum()),
+        )
+
+        st.dataframe(exibicao, use_container_width=True, hide_index=True)
+
+        st.download_button(
+            "⬇ BAIXAR HISTÓRICO PARA BACKUP NO ONEDRIVE",
+            exibicao.to_csv(index=False).encode("utf-8-sig"),
+            file_name=(
+                "historico_score_vendas_"
+                + datetime.now(TIMEZONE_BRASILIA).strftime("%Y%m%d_%H%M")
+                + ".csv"
+            ),
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+        st.warning(
+            "⚠️ O histórico armazenado no servidor do Streamlit é temporário. "
+            "Faça o backup no OneDrive corporativo."
         )
 
 
 # ============================================================
-# NOTAS DE IMPLANTAÇÃO — V7
+# RODAPÉ
 # ============================================================
-# 1) GitHub:
-#    app.py
-#    empreendimentos.xlsx
-#    requirements.txt
+st.divider()
+st.caption(
+    "V7.1 — Projeto Defensores do Contrato | "
+    "Score SPC exclusivamente do proponente | Histórico administrativo do piloto"
+)
+
+# ============================================================
+# CONFIGURAÇÃO NECESSÁRIA NO STREAMLIT CLOUD
+# ============================================================
+# Em App > Settings > Secrets:
 #
-# 2) requirements.txt:
-#    streamlit>=1.42
-#    pandas
-#    openpyxl
-#    pdfplumber
+# [admin]
+# senha = "ESCOLHA_UMA_SENHA_FORTE"
 #
-# 3) Para começar o uso oficial sem os testes:
-#    exclua historico.csv do repositório antes da publicação oficial.
+# Nunca coloque essa senha no GitHub.
 #
-# 4) Score:
-#    27–60  = ALTO RISCO
-#    61–89  = RISCO MODERADO
-#    90–130 = BAIXO RISCO
+# O arquivo de cadastro esperado é:
+# empreendimentos.xlsx
 #
-# 5) Score SPC:
-#    somente o PROPONENTE participa do cálculo.
-#    Clientes adicionais entram somente na composição da renda.
+# requirements.txt:
+# streamlit
+# pandas
+# openpyxl
+# pdfplumber
 #
-# 6) Horário:
-#    America/Sao_Paulo.
-#
-# 7) Histórico por usuário:
-#    a lista "Only specific people can view this app" do Community Cloud
-#    controla quem abre o app, mas nas versões atuais não fornece, sozinha,
-#    o e-mail do viewer ao código via st.user.
-#    Para habilitar a segregação por e-mail, configure autenticação OIDC
-#    (Microsoft, Google, Okta etc.) nos Secrets do Streamlit.
-#
-# 8) Administrador:
-#    depois de configurar OIDC, inclua o(s) e-mail(s) em ADMINISTRADORES.
-#
-# 9) Segurança:
-#    nunca coloque client_secret/senhas no GitHub.
-#
-# 10) Persistência:
-#    historico.csv continua sendo solução de PILOTO. Para produção
-#    multiusuário, migre o histórico para armazenamento persistente.
+# O historico.csv é temporário. Baixe backups periódicos e salve no OneDrive.
