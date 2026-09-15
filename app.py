@@ -1,311 +1,227 @@
 
 
 import streamlit as st
-from datetime import date, datetime
-import pdfplumber
-import re
 import pandas as pd
+from datetime import date, datetime
 import os
+import re
 
-st.set_page_config(page_title="Simulador Score de Venda", page_icon="🏡", layout="wide")
-
-st.title("🏡 Simulador de Score de Venda — URBA")
-st.markdown("---")
+try:
+    import pdfplumber
+    PDF_OK = True
+except ImportError:
+    PDF_OK = False
 
 # ─────────────────────────────────────────
-# DADOS DO EMPREENDIMENTO
+# CONFIGURAÇÃO DA PÁGINA
 # ─────────────────────────────────────────
+st.set_page_config(
+    page_title="Simulador de Score de Vendas",
+    page_icon="🏠",
+    layout="wide"
+)
 
-UNIDADES = [
-    "SMART URBA RESERVA - QUADRA 01 - LOTE 0001","SMART URBA RESERVA - QUADRA 01 - LOTE 0002","SMART URBA RESERVA - QUADRA 01 - LOTE 0003","SMART URBA RESERVA - QUADRA 01 - LOTE 0004","SMART URBA RESERVA - QUADRA 01 - LOTE 0005","SMART URBA RESERVA - QUADRA 01 - LOTE 0006","SMART URBA RESERVA - QUADRA 01 - LOTE 0007","SMART URBA RESERVA - QUADRA 01 - LOTE 0008","SMART URBA RESERVA - QUADRA 01 - LOTE 0009","SMART URBA RESERVA - QUADRA 01 - LOTE 0010","SMART URBA RESERVA - QUADRA 01 - LOTE 0011","SMART URBA RESERVA - QUADRA 01 - LOTE 0012","SMART URBA RESERVA - QUADRA 01 - LOTE 0013","SMART URBA RESERVA - QUADRA 01 - LOTE 0014","SMART URBA RESERVA - QUADRA 01 - LOTE 0015","SMART URBA RESERVA - QUADRA 01 - LOTE 0016","SMART URBA RESERVA - QUADRA 01 - LOTE 0017","SMART URBA RESERVA - QUADRA 01 - LOTE 0018","SMART URBA RESERVA - QUADRA 01 - LOTE 0019",
-    "SMART URBA RESERVA - QUADRA 02 - LOTE 0001","SMART URBA RESERVA - QUADRA 02 - LOTE 0002","SMART URBA RESERVA - QUADRA 02 - LOTE 0003","SMART URBA RESERVA - QUADRA 02 - LOTE 0004","SMART URBA RESERVA - QUADRA 02 - LOTE 0005","SMART URBA RESERVA - QUADRA 02 - LOTE 0006","SMART URBA RESERVA - QUADRA 02 - LOTE 0007","SMART URBA RESERVA - QUADRA 02 - LOTE 0008","SMART URBA RESERVA - QUADRA 02 - LOTE 0009","SMART URBA RESERVA - QUADRA 02 - LOTE 0010","SMART URBA RESERVA - QUADRA 02 - LOTE 0011","SMART URBA RESERVA - QUADRA 02 - LOTE 0012","SMART URBA RESERVA - QUADRA 02 - LOTE 0013","SMART URBA RESERVA - QUADRA 02 - LOTE 0014","SMART URBA RESERVA - QUADRA 02 - LOTE 0015","SMART URBA RESERVA - QUADRA 02 - LOTE 0016","SMART URBA RESERVA - QUADRA 02 - LOTE 0017","SMART URBA RESERVA - QUADRA 02 - LOTE 0018","SMART URBA RESERVA - QUADRA 02 - LOTE 0019","SMART URBA RESERVA - QUADRA 02 - LOTE 0020","SMART URBA RESERVA - QUADRA 02 - LOTE 0021","SMART URBA RESERVA - QUADRA 02 - LOTE 0022","SMART URBA RESERVA - QUADRA 02 - LOTE 0023","SMART URBA RESERVA - QUADRA 02 - LOTE 0024","SMART URBA RESERVA - QUADRA 02 - LOTE 0025","SMART URBA RESERVA - QUADRA 02 - LOTE 0026","SMART URBA RESERVA - QUADRA 02 - LOTE 0027","SMART URBA RESERVA - QUADRA 02 - LOTE 0028","SMART URBA RESERVA - QUADRA 02 - LOTE 0029","SMART URBA RESERVA - QUADRA 02 - LOTE 0030","SMART URBA RESERVA - QUADRA 02 - LOTE 0031","SMART URBA RESERVA - QUADRA 02 - LOTE 0032","SMART URBA RESERVA - QUADRA 02 - LOTE 0033","SMART URBA RESERVA - QUADRA 02 - LOTE 0034","SMART URBA RESERVA - QUADRA 02 - LOTE 0035","SMART URBA RESERVA - QUADRA 02 - LOTE 0036","SMART URBA RESERVA - QUADRA 02 - LOTE 0037","SMART URBA RESERVA - QUADRA 02 - LOTE 0038","SMART URBA RESERVA - QUADRA 02 - LOTE 0039",
-    "SMART URBA RESERVA - QUADRA 03 - LOTE 0001","SMART URBA RESERVA - QUADRA 03 - LOTE 0002","SMART URBA RESERVA - QUADRA 03 - LOTE 0003","SMART URBA RESERVA - QUADRA 03 - LOTE 0004","SMART URBA RESERVA - QUADRA 03 - LOTE 0005","SMART URBA RESERVA - QUADRA 03 - LOTE 0006","SMART URBA RESERVA - QUADRA 03 - LOTE 0007","SMART URBA RESERVA - QUADRA 03 - LOTE 0008","SMART URBA RESERVA - QUADRA 03 - LOTE 0009","SMART URBA RESERVA - QUADRA 03 - LOTE 0010","SMART URBA RESERVA - QUADRA 03 - LOTE 0011","SMART URBA RESERVA - QUADRA 03 - LOTE 0012","SMART URBA RESERVA - QUADRA 03 - LOTE 0013","SMART URBA RESERVA - QUADRA 03 - LOTE 0014","SMART URBA RESERVA - QUADRA 03 - LOTE 0015","SMART URBA RESERVA - QUADRA 03 - LOTE 0016","SMART URBA RESERVA - QUADRA 03 - LOTE 0017","SMART URBA RESERVA - QUADRA 03 - LOTE 0018","SMART URBA RESERVA - QUADRA 03 - LOTE 0019","SMART URBA RESERVA - QUADRA 03 - LOTE 0020","SMART URBA RESERVA - QUADRA 03 - LOTE 0021","SMART URBA RESERVA - QUADRA 03 - LOTE 0022","SMART URBA RESERVA - QUADRA 03 - LOTE 0023","SMART URBA RESERVA - QUADRA 03 - LOTE 0024","SMART URBA RESERVA - QUADRA 03 - LOTE 0025","SMART URBA RESERVA - QUADRA 03 - LOTE 0026","SMART URBA RESERVA - QUADRA 03 - LOTE 0027","SMART URBA RESERVA - QUADRA 03 - LOTE 0028",
-    "SMART URBA RESERVA - QUADRA 04 - LOTE 0001","SMART URBA RESERVA - QUADRA 04 - LOTE 0002","SMART URBA RESERVA - QUADRA 04 - LOTE 0003","SMART URBA RESERVA - QUADRA 04 - LOTE 0004","SMART URBA RESERVA - QUADRA 04 - LOTE 0005","SMART URBA RESERVA - QUADRA 04 - LOTE 0006","SMART URBA RESERVA - QUADRA 04 - LOTE 0007","SMART URBA RESERVA - QUADRA 04 - LOTE 0008","SMART URBA RESERVA - QUADRA 04 - LOTE 0009","SMART URBA RESERVA - QUADRA 04 - LOTE 0010","SMART URBA RESERVA - QUADRA 04 - LOTE 0011","SMART URBA RESERVA - QUADRA 04 - LOTE 0012","SMART URBA RESERVA - QUADRA 04 - LOTE 0013","SMART URBA RESERVA - QUADRA 04 - LOTE 0014","SMART URBA RESERVA - QUADRA 04 - LOTE 0015","SMART URBA RESERVA - QUADRA 04 - LOTE 0016","SMART URBA RESERVA - QUADRA 04 - LOTE 0017","SMART URBA RESERVA - QUADRA 04 - LOTE 0018","SMART URBA RESERVA - QUADRA 04 - LOTE 0019","SMART URBA RESERVA - QUADRA 04 - LOTE 0020","SMART URBA RESERVA - QUADRA 04 - LOTE 0021","SMART URBA RESERVA - QUADRA 04 - LOTE 0022","SMART URBA RESERVA - QUADRA 04 - LOTE 0023","SMART URBA RESERVA - QUADRA 04 - LOTE 0024","SMART URBA RESERVA - QUADRA 04 - LOTE 0025","SMART URBA RESERVA - QUADRA 04 - LOTE 0026","SMART URBA RESERVA - QUADRA 04 - LOTE 0027","SMART URBA RESERVA - QUADRA 04 - LOTE 0028","SMART URBA RESERVA - QUADRA 04 - LOTE 0029","SMART URBA RESERVA - QUADRA 04 - LOTE 0030","SMART URBA RESERVA - QUADRA 04 - LOTE 0031","SMART URBA RESERVA - QUADRA 04 - LOTE 0032","SMART URBA RESERVA - QUADRA 04 - LOTE 0033","SMART URBA RESERVA - QUADRA 04 - LOTE 0034","SMART URBA RESERVA - QUADRA 04 - LOTE 0035","SMART URBA RESERVA - QUADRA 04 - LOTE 0036","SMART URBA RESERVA - QUADRA 04 - LOTE 0037","SMART URBA RESERVA - QUADRA 04 - LOTE 0038","SMART URBA RESERVA - QUADRA 04 - LOTE 0039","SMART URBA RESERVA - QUADRA 04 - LOTE 0040","SMART URBA RESERVA - QUADRA 04 - LOTE 0041","SMART URBA RESERVA - QUADRA 04 - LOTE 0042","SMART URBA RESERVA - QUADRA 04 - LOTE 0043","SMART URBA RESERVA - QUADRA 04 - LOTE 0044",
-    "SMART URBA RESERVA - QUADRA 05 - LOTE 0001","SMART URBA RESERVA - QUADRA 05 - LOTE 0002","SMART URBA RESERVA - QUADRA 05 - LOTE 0003","SMART URBA RESERVA - QUADRA 05 - LOTE 0004","SMART URBA RESERVA - QUADRA 05 - LOTE 0005","SMART URBA RESERVA - QUADRA 05 - LOTE 0006","SMART URBA RESERVA - QUADRA 05 - LOTE 0007","SMART URBA RESERVA - QUADRA 05 - LOTE 0008","SMART URBA RESERVA - QUADRA 05 - LOTE 0009","SMART URBA RESERVA - QUADRA 05 - LOTE 0010","SMART URBA RESERVA - QUADRA 05 - LOTE 0011","SMART URBA RESERVA - QUADRA 05 - LOTE 0012","SMART URBA RESERVA - QUADRA 05 - LOTE 0013","SMART URBA RESERVA - QUADRA 05 - LOTE 0014","SMART URBA RESERVA - QUADRA 05 - LOTE 0015","SMART URBA RESERVA - QUADRA 05 - LOTE 0016","SMART URBA RESERVA - QUADRA 05 - LOTE 0017","SMART URBA RESERVA - QUADRA 05 - LOTE 0018","SMART URBA RESERVA - QUADRA 05 - LOTE 0019","SMART URBA RESERVA - QUADRA 05 - LOTE 0020","SMART URBA RESERVA - QUADRA 05 - LOTE 0021","SMART URBA RESERVA - QUADRA 05 - LOTE 0022","SMART URBA RESERVA - QUADRA 05 - LOTE 0023","SMART URBA RESERVA - QUADRA 05 - LOTE 0024","SMART URBA RESERVA - QUADRA 05 - LOTE 0025","SMART URBA RESERVA - QUADRA 05 - LOTE 0026","SMART URBA RESERVA - QUADRA 05 - LOTE 0027","SMART URBA RESERVA - QUADRA 05 - LOTE 0028","SMART URBA RESERVA - QUADRA 05 - LOTE 0029","SMART URBA RESERVA - QUADRA 05 - LOTE 0030","SMART URBA RESERVA - QUADRA 05 - LOTE 0031","SMART URBA RESERVA - QUADRA 05 - LOTE 0032","SMART URBA RESERVA - QUADRA 05 - LOTE 0033","SMART URBA RESERVA - QUADRA 05 - LOTE 0034","SMART URBA RESERVA - QUADRA 05 - LOTE 0035","SMART URBA RESERVA - QUADRA 05 - LOTE 0036","SMART URBA RESERVA - QUADRA 05 - LOTE 0037","SMART URBA RESERVA - QUADRA 05 - LOTE 0038","SMART URBA RESERVA - QUADRA 05 - LOTE 0039","SMART URBA RESERVA - QUADRA 05 - LOTE 0040","SMART URBA RESERVA - QUADRA 05 - LOTE 0041","SMART URBA RESERVA - QUADRA 05 - LOTE 0042","SMART URBA RESERVA - QUADRA 05 - LOTE 0043","SMART URBA RESERVA - QUADRA 05 - LOTE 0044","SMART URBA RESERVA - QUADRA 05 - LOTE 0045","SMART URBA RESERVA - QUADRA 05 - LOTE 0046","SMART URBA RESERVA - QUADRA 05 - LOTE 0047","SMART URBA RESERVA - QUADRA 05 - LOTE 0048","SMART URBA RESERVA - QUADRA 05 - LOTE 0049","SMART URBA RESERVA - QUADRA 05 - LOTE 0050","SMART URBA RESERVA - QUADRA 05 - LOTE 0051","SMART URBA RESERVA - QUADRA 05 - LOTE 0052","SMART URBA RESERVA - QUADRA 05 - LOTE 0053","SMART URBA RESERVA - QUADRA 05 - LOTE 0054","SMART URBA RESERVA - QUADRA 05 - LOTE 0055","SMART URBA RESERVA - QUADRA 05 - LOTE 0056","SMART URBA RESERVA - QUADRA 05 - LOTE 0057","SMART URBA RESERVA - QUADRA 05 - LOTE 0058","SMART URBA RESERVA - QUADRA 05 - LOTE 0059","SMART URBA RESERVA - QUADRA 05 - LOTE 0060","SMART URBA RESERVA - QUADRA 05 - LOTE 0061","SMART URBA RESERVA - QUADRA 05 - LOTE 0062","SMART URBA RESERVA - QUADRA 05 - LOTE 0063",
-    "SMART URBA RESERVA - QUADRA 06 - LOTE 0001","SMART URBA RESERVA - QUADRA 06 - LOTE 0002","SMART URBA RESERVA - QUADRA 06 - LOTE 0003","SMART URBA RESERVA - QUADRA 06 - LOTE 0004","SMART URBA RESERVA - QUADRA 06 - LOTE 0005","SMART URBA RESERVA - QUADRA 06 - LOTE 0006","SMART URBA RESERVA - QUADRA 06 - LOTE 0007","SMART URBA RESERVA - QUADRA 06 - LOTE 0008","SMART URBA RESERVA - QUADRA 06 - LOTE 0009","SMART URBA RESERVA - QUADRA 06 - LOTE 0010","SMART URBA RESERVA - QUADRA 06 - LOTE 0011","SMART URBA RESERVA - QUADRA 06 - LOTE 0012","SMART URBA RESERVA - QUADRA 06 - LOTE 0013","SMART URBA RESERVA - QUADRA 06 - LOTE 0014","SMART URBA RESERVA - QUADRA 06 - LOTE 0015","SMART URBA RESERVA - QUADRA 06 - LOTE 0016",
-    "SMART URBA RESERVA - QUADRA 07 - LOTE 0001","SMART URBA RESERVA - QUADRA 07 - LOTE 0002","SMART URBA RESERVA - QUADRA 07 - LOTE 0003","SMART URBA RESERVA - QUADRA 07 - LOTE 0004","SMART URBA RESERVA - QUADRA 07 - LOTE 0005","SMART URBA RESERVA - QUADRA 07 - LOTE 0006","SMART URBA RESERVA - QUADRA 07 - LOTE 0007","SMART URBA RESERVA - QUADRA 07 - LOTE 0008","SMART URBA RESERVA - QUADRA 07 - LOTE 0009","SMART URBA RESERVA - QUADRA 07 - LOTE 0010","SMART URBA RESERVA - QUADRA 07 - LOTE 0011","SMART URBA RESERVA - QUADRA 07 - LOTE 0012","SMART URBA RESERVA - QUADRA 07 - LOTE 0013","SMART URBA RESERVA - QUADRA 07 - LOTE 0014","SMART URBA RESERVA - QUADRA 07 - LOTE 0015","SMART URBA RESERVA - QUADRA 07 - LOTE 0016","SMART URBA RESERVA - QUADRA 07 - LOTE 0017","SMART URBA RESERVA - QUADRA 07 - LOTE 0018","SMART URBA RESERVA - QUADRA 07 - LOTE 0019","SMART URBA RESERVA - QUADRA 07 - LOTE 0020","SMART URBA RESERVA - QUADRA 07 - LOTE 0021","SMART URBA RESERVA - QUADRA 07 - LOTE 0022",
-    "SMART URBA RESERVA - QUADRA 08 - LOTE 0001","SMART URBA RESERVA - QUADRA 08 - LOTE 0002","SMART URBA RESERVA - QUADRA 08 - LOTE 0003","SMART URBA RESERVA - QUADRA 08 - LOTE 0004","SMART URBA RESERVA - QUADRA 08 - LOTE 0005","SMART URBA RESERVA - QUADRA 08 - LOTE 0006","SMART URBA RESERVA - QUADRA 08 - LOTE 0007","SMART URBA RESERVA - QUADRA 08 - LOTE 0008","SMART URBA RESERVA - QUADRA 08 - LOTE 0009","SMART URBA RESERVA - QUADRA 08 - LOTE 0010","SMART URBA RESERVA - QUADRA 08 - LOTE 0011","SMART URBA RESERVA - QUADRA 08 - LOTE 0012","SMART URBA RESERVA - QUADRA 08 - LOTE 0013","SMART URBA RESERVA - QUADRA 08 - LOTE 0014","SMART URBA RESERVA - QUADRA 08 - LOTE 0015","SMART URBA RESERVA - QUADRA 08 - LOTE 0016","SMART URBA RESERVA - QUADRA 08 - LOTE 0017","SMART URBA RESERVA - QUADRA 08 - LOTE 0018","SMART URBA RESERVA - QUADRA 08 - LOTE 0019","SMART URBA RESERVA - QUADRA 08 - LOTE 0020","SMART URBA RESERVA - QUADRA 08 - LOTE 0021","SMART URBA RESERVA - QUADRA 08 - LOTE 0022","SMART URBA RESERVA - QUADRA 08 - LOTE 0023","SMART URBA RESERVA - QUADRA 08 - LOTE 0024","SMART URBA RESERVA - QUADRA 08 - LOTE 0025","SMART URBA RESERVA - QUADRA 08 - LOTE 0026","SMART URBA RESERVA - QUADRA 08 - LOTE 0027","SMART URBA RESERVA - QUADRA 08 - LOTE 0028","SMART URBA RESERVA - QUADRA 08 - LOTE 0029","SMART URBA RESERVA - QUADRA 08 - LOTE 0030","SMART URBA RESERVA - QUADRA 08 - LOTE 0031","SMART URBA RESERVA - QUADRA 08 - LOTE 0032","SMART URBA RESERVA - QUADRA 08 - LOTE 0033","SMART URBA RESERVA - QUADRA 08 - LOTE 0034","SMART URBA RESERVA - QUADRA 08 - LOTE 0035","SMART URBA RESERVA - QUADRA 08 - LOTE 0036","SMART URBA RESERVA - QUADRA 08 - LOTE 0037","SMART URBA RESERVA - QUADRA 08 - LOTE 0038","SMART URBA RESERVA - QUADRA 08 - LOTE 0039","SMART URBA RESERVA - QUADRA 08 - LOTE 0040","SMART URBA RESERVA - QUADRA 08 - LOTE 0041","SMART URBA RESERVA - QUADRA 08 - LOTE 0042","SMART URBA RESERVA - QUADRA 08 - LOTE 0043","SMART URBA RESERVA - QUADRA 08 - LOTE 0044",
-]
+st.title("🏠 Simulador de Score de Vendas")
+st.markdown("**Projeto Defensores do Contrato — Avaliação de Risco de Distrato**")
+st.divider()
 
-EMPREENDIMENTO = "SMART URBA RESERVA"
-TIPO_PRODUTO = "SMART"
+# ─────────────────────────────────────────
+# LISTA DE EMPREENDIMENTOS
+# ─────────────────────────────────────────
+EMPREENDIMENTOS = {
+    "SMART URBA RESERVA": {
+        "tipo": "SMART",
+        "unidades": [
+            "QUADRA 01 LOTE 01", "QUADRA 01 LOTE 02", "QUADRA 01 LOTE 03",
+            "QUADRA 01 LOTE 04", "QUADRA 01 LOTE 05", "QUADRA 02 LOTE 01",
+            "QUADRA 02 LOTE 02", "QUADRA 02 LOTE 03", "QUADRA 02 LOTE 04",
+            "QUADRA 02 LOTE 05", "QUADRA 03 LOTE 01", "QUADRA 03 LOTE 02",
+        ]
+    }
+}
+
+TIPOS_PRODUTO = ["LOTEAMENTO ABERTO", "CONDOMÍNIO SMART", "LOTEAMENTO FECHADO", "SMART"]
+
+# ─────────────────────────────────────────
+# TABELAS DE PARÂMETROS
+# ─────────────────────────────────────────
+PESOS = {
+    "score_credito":         5,
+    "ato":                   5,
+    "comprometimento_renda": 4,
+    "faixa_renda":           4,
+    "plano":                 4,
+    "tipo_produto":          3,
+    "idade":                 1,
+    "estado_civil":          1,
+}
+
+NOTAS_SCORE = {
+    "A - B": 5,
+    "C - D": 3,
+    "E - F": 1,
+}
+
+NOTAS_ATO = {
+    "ACIMA DE 4%":  5,
+    "3% A 4%":      3,
+    "2% A 3%":      4,
+    "1% A 2%":      2,
+    "ABAIXO DE 1%": 1,
+}
+
+NOTAS_COMPROMETIMENTO = {
+    "ATÉ 10%":       5,
+    "10% A 20%":     4,
+    "20% A 30%":     3,
+    "30% A 50%":     2,
+    "50% A 100%":    1,
+    "ACIMA DE 100%": 1,
+}
+
+NOTAS_RENDA = {
+    "ACIMA DE R$ 15.000":      5,
+    "R$ 10.001 A R$ 15.000":   4,
+    "R$ 7.501 A R$ 10.000":    3,
+    "R$ 5.001 A R$ 7.500":     2,
+    "R$ 2.501 A R$ 5.000":     1,
+    "ATÉ R$ 2.500":            1,
+}
+
+NOTAS_PLANO = {
+    "CURTO PRAZO (1 A 48X)":          5,
+    "MÉDIO PRAZO (49 A 70X)":         3,
+    "MÉDIO LONGO (71 A 144X)":        2,
+    "LONGO PRAZO (145 A 180X)":       1,
+}
+
+NOTAS_TIPO_PRODUTO = {
+    "LOTEAMENTO FECHADO": 4,
+    "SMART":              3,
+    "CONDOMÍNIO SMART":   2,
+    "LOTEAMENTO ABERTO":  1,
+}
+
+NOTAS_IDADE = {
+    "35 A 45 ANOS": 3,
+    "45 A 60 ANOS": 4,
+    "60+ ANOS":     5,
+    "25 A 35 ANOS": 1,
+    "ATÉ 25 ANOS":  2,
+}
+
+NOTAS_ESTADO_CIVIL = {
+    "CASADO(A)":     3,
+    "DIVORCIADO(A)": 2,
+    "SOLTEIRO(A)":   1,
+}
+
+SCORE_MAX = 130
+LIMITE_BAIXO = 90
+LIMITE_MODERADO = 61
 
 # ─────────────────────────────────────────
 # FUNÇÕES AUXILIARES
 # ─────────────────────────────────────────
+def calcular_idade(nascimento):
+    hoje = date.today()
+    return hoje.year - nascimento.year - ((hoje.month, hoje.day) < (nascimento.month, nascimento.day))
+
+def faixa_etaria(idade):
+    if idade <= 25:  return "ATÉ 25 ANOS"
+    elif idade <= 35: return "25 A 35 ANOS"
+    elif idade <= 45: return "35 A 45 ANOS"
+    elif idade <= 60: return "45 A 60 ANOS"
+    else:             return "60+ ANOS"
+
+def faixa_comprometimento(perc):
+    if perc <= 10:   return "ATÉ 10%"
+    elif perc <= 20: return "10% A 20%"
+    elif perc <= 30: return "20% A 30%"
+    elif perc <= 50: return "30% A 50%"
+    elif perc <= 100:return "50% A 100%"
+    else:            return "ACIMA DE 100%"
+
+def faixa_renda(valor):
+    if valor > 15000:   return "ACIMA DE R$ 15.000"
+    elif valor > 10000: return "R$ 10.001 A R$ 15.000"
+    elif valor > 7500:  return "R$ 7.501 A R$ 10.000"
+    elif valor > 5000:  return "R$ 5.001 A R$ 7.500"
+    elif valor > 2500:  return "R$ 2.501 A R$ 5.000"
+    else:               return "ATÉ R$ 2.500"
+
+def faixa_ato(perc):
+    if perc >= 4:   return "ACIMA DE 4%"
+    elif perc >= 3: return "3% A 4%"
+    elif perc >= 2: return "2% A 3%"
+    elif perc >= 1: return "1% A 2%"
+    else:           return "ABAIXO DE 1%"
+
+def calcular_score_total(notas):
+    return sum(notas[k] * PESOS[k] for k in PESOS)
+
+def classificar(score):
+    if score >= LIMITE_BAIXO:    return "🟢 BAIXO RISCO",    "green"
+    elif score >= LIMITE_MODERADO: return "🟡 RISCO MODERADO", "orange"
+    else:                          return "🔴 ALTO RISCO",     "red"
 
 def extrair_dados_spc(pdf_file):
-    """
-    Extrai Score de Crédito (Risco) e Renda Presumida do PDF do SPC.
-    Baseado no layout padrão SPC Brasil:
-      - Score/Risco: linha com 'RISCO DE CREDITO' seguida de letra A-F
-      - Renda Presumida: linha com 'RENDA' e valor monetário
-    """
-    score = None
-    renda = None
+    """Extrai Score (Risco de Crédito) e Renda Presumida do PDF do SPC."""
+    score_extraido = None
+    renda_extraida = None
+
+    if not PDF_OK:
+        return score_extraido, renda_extraida
+
     try:
         with pdfplumber.open(pdf_file) as pdf:
-            texto = ""
+            texto_completo = ""
             for page in pdf.pages:
                 t = page.extract_text()
                 if t:
-                    texto += t + "\n"
+                    texto_completo += t + "\n"
 
-        texto_upper = texto.upper()
+        texto_upper = texto_completo.upper()
 
-        # ── EXTRAÇÃO DO SCORE / RISCO DE CRÉDITO ──────────────────────────
-        # Padrão 1: "RISCO DE CREDITO C" ou "RISCO DE CRÉDITO: C"
-        match_risco = re.search(
-            r'RISCO\s+DE\s+CR[EÉ]DITO[\s:]+([A-F])',
-            texto_upper
-        )
-        # Padrão 2: "SCORE C" ou "SCORE: C" ou "SCORE CREDITO C"
-        match_score_direto = re.search(
-            r'SCORE[\s\w]*?[\s:]+([A-F])\b',
-            texto_upper
-        )
-        # Padrão 3: letra isolada após "CLASSIFICAÇÃO"
-        match_classif = re.search(
-            r'CLASSIFICA[CÇ][AÃ]O[\s:]+([A-F])\b',
-            texto_upper
-        )
+        # ── Extração do Score / Risco de Crédito ──────────────────
+        # Padrão: "RISCO DE CREDITO C" ou "RISCO DE CRÉDITO: C"
+        padroes_score = [
+            r"RISCO\s+DE\s+CR[EÉ]DITO[:\s]+([A-F])",
+            r"SCORE[:\s]+([A-F])\b",
+            r"CLASSIFICA[CÇ][AÃ]O[:\s]+([A-F])\b",
+        ]
+        for padrao in padroes_score:
+            match = re.search(padrao, texto_upper)
+            if match:
+                letra = match.group(1).upper()
+                if letra in ["A", "B"]:
+                    score_extraido = "A - B"
+                elif letra in ["C", "D"]:
+                    score_extraido = "C - D"
+                elif letra in ["E", "F"]:
+                    score_extraido = "E - F"
+                break
 
-        letra_encontrada = None
-        if match_risco:
-            letra_encontrada = match_risco.group(1)
-        elif match_score_direto:
-            letra_encontrada = match_score_direto.group(1)
-        elif match_classif:
-            letra_encontrada = match_classif.group(1)
-
-        if letra_encontrada:
-            if letra_encontrada in ['A', 'B']:
-                score = 'A - B'
-            elif letra_encontrada in ['C', 'D']:
-                score = 'C - D'
-            else:
-                score = 'E - F'
-
-        # ── EXTRAÇÃO DA RENDA PRESUMIDA ────────────────────────────────────
-        # Padrão 1: "RENDA PRESUMIDA R$ 8.870,00" ou "RENDA PRESUMIDA: 8.870,00"
-        match_renda = re.search(
-            r'RENDA\s+PRESUMIDA[\s:R$]*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)',
-            texto_upper
-        )
-        # Padrão 2: "RENDA ESTIMADA" como fallback
-        if not match_renda:
-            match_renda = re.search(
-                r'RENDA\s+ESTIMADA[\s:R$]*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)',
-                texto_upper
-            )
-        # Padrão 3: "RENDA R$" genérico como último recurso
-        if not match_renda:
-            match_renda = re.search(
-                r'RENDA[\s:]+R?\$?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)',
-                texto_upper
-            )
-
-        if match_renda:
-            valor_str = match_renda.group(1)
-            # Converte formato brasileiro: 8.870,00 -> 8870.00
-            valor_str = valor_str.replace('.', '').replace(',', '.')
-            try:
-                renda = float(valor_str)
-            except ValueError:
-                renda = None
+        # ── Extração da Renda Presumida ───────────────────────────
+        padroes_renda = [
+            r"RENDA\s+PRESUMIDA[:\s]*R?\$?\s*([\d\.]+(?:,\d{2})?)",
+            r"RENDA\s+ESTIMADA[:\s]*R?\$?\s*([\d\.]+(?:,\d{2})?)",
+            r"RENDA[:\s]*R?\$?\s*([\d\.]+(?:,\d{2})?)",
+        ]
+        for padrao in padroes_renda:
+            match = re.search(padrao, texto_upper)
+            if match:
+                valor_str = match.group(1).replace(".", "").replace(",", ".")
+                try:
+                    renda_extraida = float(valor_str)
+                except:
+                    pass
+                break
 
     except Exception as e:
-        st.warning(f"Erro ao processar PDF: {e}")
+        st.warning(f"Erro ao ler PDF: {e}")
 
-    return score, renda
-
-
-def classificar_score(score_str):
-    notas = {'A - B': 5, 'C - D': 3, 'E - F': 1}
-    return notas.get(score_str, 1)
-
-
-def calcular_idade(data_nasc):
-    if data_nasc is None:
-        return None
-    hoje = date.today()
-    return hoje.year - data_nasc.year - (
-        (hoje.month, hoje.day) < (data_nasc.month, data_nasc.day)
-    )
-
-
-def faixa_idade_str(data_nasc):
-    idade = calcular_idade(data_nasc)
-    if idade is None:
-        return "—"
-    if idade < 25:
-        return "ATÉ 25 ANOS"
-    elif idade <= 35:
-        return "25 A 35 ANOS"
-    elif idade <= 45:
-        return "35 A 45 ANOS"
-    elif idade <= 60:
-        return "45 A 60 ANOS"
-    else:
-        return "60+ ANOS"
-
-
-def classificar_idade(data_nasc):
-    idade = calcular_idade(data_nasc)
-    if idade is None:
-        return 0
-    if idade < 25:
-        return 2
-    elif idade <= 35:
-        return 1
-    elif idade <= 45:
-        return 3
-    elif idade <= 60:
-        return 4
-    else:
-        return 5
-
-
-def classificar_estado_civil(ec):
-    notas = {'CASADO(A)': 3, 'DIVORCIADO(A)': 2, 'SOLTEIRO(A)': 1}
-    return notas.get(ec, 1)
-
-
-def classificar_plano(plano):
-    notas = {
-        'CURTO PRAZO (1 A 48X)': 5,
-        'MÉDIO PRAZO (49 A 70X)': 3,
-        'MÉDIO LONGO (71 A 144X)': 2,
-        'LONGO PRAZO (145 A 180X)': 1,
-    }
-    return notas.get(plano, 1)
-
-
-def classificar_tipo_produto(tp):
-    notas = {
-        'LOTEAMENTO FECHADO': 4,
-        'SMART': 3,
-        'CONDOMÍNIO': 2,
-        'LOTEAMENTO ABERTO': 1,
-    }
-    return notas.get(tp, 1)
-
-
-def classificar_faixa_renda(renda):
-    if not renda or renda == 0:
-        return 0, "—"
-    if renda <= 2500:
-        return 1, "ATÉ R$ 2.500"
-    elif renda <= 5000:
-        return 1, "R$ 2.501 A R$ 5.000"
-    elif renda <= 7500:
-        return 2, "R$ 5.001 A R$ 7.500"
-    elif renda <= 10000:
-        return 3, "R$ 7.501 A R$ 10.000"
-    elif renda <= 15000:
-        return 4, "R$ 10.001 A R$ 15.000"
-    else:
-        return 5, "ACIMA DE R$ 15.000"
-
-
-def classificar_comprometimento(comp_pct):
-    if comp_pct is None:
-        return 0, "—"
-    if comp_pct <= 10:
-        return 5, "ATÉ 10%"
-    elif comp_pct <= 20:
-        return 4, "10% A 20%"
-    elif comp_pct <= 30:
-        return 3, "20% A 30%"
-    elif comp_pct <= 50:
-        return 2, "30% A 50%"
-    elif comp_pct <= 100:
-        return 1, "50% A 100%"
-    else:
-        return 1, "ACIMA DE 100%"
-
-
-def classificar_ato(pct_ato):
-    if pct_ato > 4.0:
-        return 5
-    elif pct_ato >= 3.0:
-        return 3
-    elif pct_ato >= 2.0:
-        return 4
-    elif pct_ato >= 1.0:
-        return 2
-    else:
-        return 1
-
-
-def calcular_score_total(n_idade, n_ato, n_score, n_renda, n_plano, n_ec, n_tp, n_comp):
-    return (
-        (n_idade * 1) +
-        (n_ato   * 5) +
-        (n_score * 5) +
-        (n_renda * 4) +
-        (n_plano * 4) +
-        (n_ec    * 1) +
-        (n_tp    * 3) +
-        (n_comp  * 4)
-    )
-
-
-def classificar_venda(total):
-    if total >= 90:
-        return "🟢 BAIXO RISCO", "success"
-    elif total >= 61:
-        return "🟡 RISCO MODERADO", "warning"
-    else:
-        return "🔴 ALTO RISCO", "error"
-
-
-def gerar_sugestoes(n_ato, n_score, n_renda, n_plano, n_comp, total):
-    """
-    Gera sugestões inteligentes e quantificadas para reduzir o risco.
-    Calcula quanto cada variável contribuiria se melhorada ao máximo.
-    """
-    sugs = []
-    if total >= 90:
-        return sugs  # Já é baixo risco
-
-    # Ganho potencial por variável se melhorada ao máximo
-    ganho_ato   = (5 - n_ato)   * 5
-    ganho_score = (5 - n_score) * 5
-    ganho_renda = (5 - n_renda) * 4
-    ganho_plano = (5 - n_plano) * 4
-    ganho_comp  = (5 - n_comp)  * 4
-
-    falta_moderado = max(0, 61 - total)
-    falta_baixo    = max(0, 90 - total)
-
-    if total < 61:
-        sugs.append(f"⚠️ **Score atual: {total}/130** — Faltam **{falta_moderado} pontos** para RISCO MODERADO e **{falta_baixo} pontos** para BAIXO RISCO.")
-    else:
-        sugs.append(f"⚠️ **Score atual: {total}/130** — Faltam **{falta_baixo} pontos** para BAIXO RISCO.")
-
-    sugs.append("---")
-    sugs.append("**Ajustes que podem melhorar o score (do maior para o menor impacto):**")
-
-    melhorias = []
-    if ganho_score > 0:
-        melhorias.append((ganho_score, f"📋 **Score de Crédito (SPC)** — Melhorar para A-B pode adicionar até **+{ganho_score} pontos**. Sugestão: incluir um segundo titular com score A-B na composição."))
-    if ganho_ato > 0:
-        melhorias.append((ganho_ato, f"💰 **Ato (Entrada)** — Aumentar o Ato para acima de 4% do valor da proposta pode adicionar até **+{ganho_ato} pontos**. Sugestão: negociar reforço de entrada com o cliente."))
-    if ganho_comp > 0:
-        melhorias.append((ganho_comp, f"📉 **Comprometimento de Renda** — Reduzir para até 10% pode adicionar até **+{ganho_comp} pontos**. Sugestão: composição de renda com familiar ou redução da mensal via plano mais curto."))
-    if ganho_renda > 0:
-        melhorias.append((ganho_renda, f"💵 **Faixa de Renda** — Elevar a renda total para acima de R$ 15.000 pode adicionar até **+{ganho_renda} pontos**. Sugestão: adicionar mais um proponente à composição de renda."))
-    if ganho_plano > 0:
-        melhorias.append((ganho_plano, f"📅 **Plano** — Migrar para Curto Prazo (até 48x) pode adicionar até **+{ganho_plano} pontos**. Sugestão: verificar capacidade financeira do cliente para plano mais curto."))
-
-    # Ordena do maior ganho para o menor
-    melhorias.sort(key=lambda x: x[0], reverse=True)
-    for _, texto in melhorias:
-        sugs.append(texto)
-
-    return sugs
-
+    return score_extraido, renda_extraida
 
 def salvar_historico(dados):
     arquivo = "historico.csv"
@@ -317,340 +233,351 @@ def salvar_historico(dados):
         df_final = df_novo
     df_final.to_csv(arquivo, index=False)
 
+# ─────────────────────────────────────────
+# INICIALIZAR SESSION STATE
+# ─────────────────────────────────────────
+if "scores_clientes" not in st.session_state:
+    st.session_state.scores_clientes = [None]
+if "rendas_clientes" not in st.session_state:
+    st.session_state.rendas_clientes = [0.0]
+if "num_clientes" not in st.session_state:
+    st.session_state.num_clientes = 1
 
 # ─────────────────────────────────────────
-# INTERFACE — EMPREENDIMENTO
+# FORMULÁRIO — EMPREENDIMENTO
 # ─────────────────────────────────────────
+st.subheader("🏗️ Dados do Empreendimento")
+col_emp1, col_emp2, col_emp3 = st.columns(3)
 
-st.header("🏘️ Dados do Empreendimento")
-col1, col2, col3 = st.columns(3)
-with col1:
-    unidade = st.selectbox("Unidade", options=UNIDADES, help="Digite para filtrar a unidade")
-with col2:
-    st.text_input("Empreendimento", value=EMPREENDIMENTO, disabled=True)
-with col3:
-    st.text_input("Tipo de Produto", value=TIPO_PRODUTO, disabled=True)
+with col_emp1:
+    empreendimento = st.selectbox(
+        "Empreendimento",
+        options=[""] + list(EMPREENDIMENTOS.keys()),
+        index=0
+    )
 
-st.markdown("---")
+with col_emp2:
+    if empreendimento and empreendimento in EMPREENDIMENTOS:
+        unidades_disponiveis = EMPREENDIMENTOS[empreendimento]["unidades"]
+        unidade = st.selectbox("Unidade", options=[""] + unidades_disponiveis)
+    else:
+        unidade = st.selectbox("Unidade", options=[""], disabled=True)
+
+with col_emp3:
+    if empreendimento and empreendimento in EMPREENDIMENTOS:
+        tipo_produto_auto = EMPREENDIMENTOS[empreendimento]["tipo"]
+        st.text_input("Tipo de Produto", value=tipo_produto_auto, disabled=True)
+        tipo_produto = tipo_produto_auto
+    else:
+        st.text_input("Tipo de Produto", value="", disabled=True)
+        tipo_produto = ""
+
+st.divider()
 
 # ─────────────────────────────────────────
-# PROPONENTE PRINCIPAL
+# FORMULÁRIO — DADOS DO CLIENTE PROPONENTE
 # ─────────────────────────────────────────
-
-st.header("👤 Dados do Proponente Principal")
+st.subheader("👤 Dados do Cliente Proponente")
 
 col1, col2 = st.columns(2)
+
 with col1:
-    data_nasc = st.date_input(
+    nascimento = st.date_input(
         "Data de Nascimento",
-        value=None,
         min_value=date(1930, 1, 1),
         max_value=date.today(),
-        format="DD/MM/YYYY"
+        value=date(1990, 1, 1)
     )
-    if data_nasc:
-        idade_calc = calcular_idade(data_nasc)
-        st.info(f"🎂 Idade: **{idade_calc} anos** — Faixa: **{faixa_idade_str(data_nasc)}**")
+    idade = calcular_idade(nascimento)
+    faixa = faixa_etaria(idade)
+    st.info(f"🎂 Idade: **{idade} anos** — Faixa: **{faixa}**")
+
+    estado_civil = st.selectbox(
+        "Estado Civil",
+        ["SOLTEIRO(A)", "CASADO(A)", "DIVORCIADO(A)"]
+    )
+
 with col2:
-    estado_civil = st.selectbox("Estado Civil", ["SOLTEIRO(A)", "CASADO(A)", "DIVORCIADO(A)"])
+    st.markdown("**📄 Upload do SPC — Proponente**")
+    pdf_proponente = st.file_uploader(
+        "Anexar PDF do SPC (Proponente)",
+        type=["pdf"],
+        key="pdf_prop"
+    )
 
-st.subheader("📄 Upload do PDF do SPC — Proponente Principal")
-st.caption("O sistema irá extrair automaticamente o Score de Crédito e a Renda Presumida.")
-pdf_principal = st.file_uploader(
-    "Selecione o PDF do SPC do proponente principal",
-    type=["pdf"],
-    key="pdf_p1"
-)
+    score_prop = None
+    renda_prop = 0.0
 
-score_p1_auto = None
-renda_p1_auto = 0.0
-
-if pdf_principal:
-    with st.spinner("Lendo PDF..."):
-        score_extraido, renda_extraida = extrair_dados_spc(pdf_principal)
-
-    col_a, col_b = st.columns(2)
-    with col_a:
-        if score_extraido:
-            st.success(f"✅ Score extraído automaticamente: **{score_extraido}**")
-            score_p1_auto = score_extraido
+    if pdf_proponente:
+        score_prop, renda_prop = extrair_dados_spc(pdf_proponente)
+        if score_prop:
+            st.success(f"✅ Score extraído: **{score_prop}**")
         else:
-            st.warning("⚠️ Score não encontrado no PDF. Selecione manualmente abaixo.")
-    with col_b:
-        if renda_extraida:
-            st.success(f"✅ Renda Presumida extraída: **R$ {renda_extraida:,.2f}**")
-            renda_p1_auto = renda_extraida
+            st.warning("⚠️ Score não encontrado no PDF. Selecione manualmente.")
+        if renda_prop and renda_prop > 0:
+            st.success(f"✅ Renda Presumida extraída: **R$ {renda_prop:,.2f}**")
         else:
-            st.warning("⚠️ Renda não encontrada no PDF. Preencha manualmente abaixo.")
+            st.warning("⚠️ Renda não encontrada no PDF. Informe manualmente.")
 
-score_opcoes = ["E - F", "C - D", "A - B"]
-score_p1_idx = score_opcoes.index(score_p1_auto) if score_p1_auto in score_opcoes else 0
-score_p1_sel = st.selectbox(
-    "Score de Crédito (SPC) — Proponente Principal",
-    score_opcoes,
-    index=score_p1_idx
-)
-renda_p1_input = st.number_input(
-    "Renda Presumida — Proponente Principal (R$)",
-    min_value=0.0,
-    value=float(renda_p1_auto),
-    step=100.0,
-    format="%.2f"
-)
+    opcoes_score = ["", "A - B", "C - D", "E - F"]
+    idx_score = opcoes_score.index(score_prop) if score_prop in opcoes_score else 0
+    score_proponente = st.selectbox(
+        "Score de Crédito (SPC) — Proponente",
+        opcoes_score,
+        index=idx_score
+    )
 
-st.markdown("---")
+    renda_proponente = st.number_input(
+        "Renda Presumida — Proponente (R$)",
+        min_value=0.0,
+        value=float(renda_prop) if renda_prop else 0.0,
+        step=100.0,
+        format="%.2f"
+    )
 
 # ─────────────────────────────────────────
 # CLIENTES ADICIONAIS (até 4)
 # ─────────────────────────────────────────
-
-st.header("👥 Composição de Renda — Clientes Adicionais")
-st.caption("Adicione até 4 clientes adicionais. O score consolidado será o melhor entre todos.")
+st.divider()
+st.subheader("👥 Composição de Renda — Clientes Adicionais")
 
 scores_adicionais = []
 rendas_adicionais = []
 
 for i in range(1, 5):
-    adicionar = st.checkbox(f"Adicionar Cliente {i + 1} à composição de renda?", key=f"add_{i}")
+    adicionar = st.checkbox(f"Adicionar Cliente {i+1} para composição de renda", key=f"check_{i}")
     if adicionar:
-        with st.container():
-            st.subheader(f"👤 Cliente {i + 1}")
-            pdf_add = st.file_uploader(
-                f"PDF do SPC — Cliente {i + 1}",
+        col_a, col_b = st.columns(2)
+        with col_a:
+            pdf_adicional = st.file_uploader(
+                f"PDF do SPC — Cliente {i+1}",
                 type=["pdf"],
                 key=f"pdf_add_{i}"
             )
-            score_add_auto = None
-            renda_add_auto = 0.0
+            score_add = None
+            renda_add = 0.0
+            if pdf_adicional:
+                score_add, renda_add = extrair_dados_spc(pdf_adicional)
+                if score_add:
+                    st.success(f"✅ Score: **{score_add}**")
+                if renda_add and renda_add > 0:
+                    st.success(f"✅ Renda: **R$ {renda_add:,.2f}**")
 
-            if pdf_add:
-                with st.spinner(f"Lendo PDF do Cliente {i + 1}..."):
-                    sc, rd = extrair_dados_spc(pdf_add)
-                if sc:
-                    st.success(f"✅ Score extraído: **{sc}**")
-                    score_add_auto = sc
-                else:
-                    st.warning("⚠️ Score não encontrado. Selecione manualmente.")
-                if rd:
-                    st.success(f"✅ Renda extraída: **R$ {rd:,.2f}**")
-                    renda_add_auto = rd
-                else:
-                    st.warning("⚠️ Renda não encontrada. Preencha manualmente.")
+            opcoes_s = ["", "A - B", "C - D", "E - F"]
+            idx_s = opcoes_s.index(score_add) if score_add in opcoes_s else 0
+            sc = st.selectbox(f"Score — Cliente {i+1}", opcoes_s, index=idx_s, key=f"score_add_{i}")
+            scores_adicionais.append(sc)
 
-            idx_add = score_opcoes.index(score_add_auto) if score_add_auto in score_opcoes else 0
-            score_add_sel = st.selectbox(
-                f"Score SPC — Cliente {i + 1}",
-                score_opcoes,
-                index=idx_add,
-                key=f"score_add_{i}"
-            )
-            renda_add_input = st.number_input(
-                f"Renda Presumida — Cliente {i + 1} (R$)",
+        with col_b:
+            rd = st.number_input(
+                f"Renda — Cliente {i+1} (R$)",
                 min_value=0.0,
-                value=float(renda_add_auto),
+                value=float(renda_add) if renda_add else 0.0,
                 step=100.0,
                 format="%.2f",
                 key=f"renda_add_{i}"
             )
-            scores_adicionais.append(score_add_sel)
-            rendas_adicionais.append(renda_add_input)
+            rendas_adicionais.append(rd)
     else:
         break
 
-# Renda total e score consolidado
-renda_total = renda_p1_input + sum(rendas_adicionais)
-todos_scores = [score_p1_sel] + scores_adicionais
-ordem_score = {'A - B': 3, 'C - D': 2, 'E - F': 1}
-melhor_score = max(todos_scores, key=lambda s: ordem_score.get(s, 0))
+# ─────────────────────────────────────────
+# SCORE CONSOLIDADO E RENDA TOTAL
+# ─────────────────────────────────────────
+todos_scores = [score_proponente] + [s for s in scores_adicionais if s]
+todos_scores_validos = [s for s in todos_scores if s]
 
-col_rt, col_sc = st.columns(2)
-col_rt.metric("💵 Renda Total Consolidada", f"R$ {renda_total:,.2f}")
-col_sc.metric("🏆 Score SPC Consolidado", melhor_score)
+# Melhor score entre todos os clientes
+ORDEM_SCORE = {"A - B": 1, "C - D": 2, "E - F": 3}
+if todos_scores_validos:
+    score_consolidado = min(todos_scores_validos, key=lambda x: ORDEM_SCORE.get(x, 99))
+else:
+    score_consolidado = None
 
-st.markdown("---")
+renda_total = renda_proponente + sum(rendas_adicionais)
+
+st.divider()
 
 # ─────────────────────────────────────────
 # DADOS FINANCEIROS
 # ─────────────────────────────────────────
+st.subheader("💰 Dados Financeiros")
+col3, col4 = st.columns(2)
 
-st.header("💰 Dados Financeiros")
+with col3:
+    ato_urba = st.number_input("Ato Urba (R$)", min_value=0.0, step=100.0, format="%.2f")
+    valor_proposta = st.number_input("Valor da Proposta / Líquido CV (R$)", min_value=0.01, step=100.0, format="%.2f")
 
-col1, col2 = st.columns(2)
-with col1:
-    ato_valor = st.number_input(
-        "Ato Urba (R$)",
-        min_value=0.0,
-        step=100.0,
-        format="%.2f",
-        help="Valor do ato sem comissão fora do contrato"
-    )
-with col2:
-    valor_proposta = st.number_input(
-        "Valor da Proposta / Líquido CV (R$)",
-        min_value=0.01,
-        step=100.0,
-        format="%.2f",
-        value=1.0
-    )
-
-plano = st.selectbox("Plano", [
-    "LONGO PRAZO (145 A 180X)",
-    "MÉDIO LONGO (71 A 144X)",
-    "MÉDIO PRAZO (49 A 70X)",
-    "CURTO PRAZO (1 A 48X)",
-])
-
-primeira_mensal = st.number_input(
-    "Valor da 1ª Mensal (R$)",
-    min_value=0.0,
-    step=10.0,
-    format="%.2f"
-)
-
-st.markdown("---")
+with col4:
+    plano = st.selectbox("Plano", list(NOTAS_PLANO.keys()))
+    primeira_mensal = st.number_input("Valor da 1ª Mensal (R$)", min_value=0.01, step=10.0, format="%.2f")
 
 # ─────────────────────────────────────────
 # CÁLCULOS AUTOMÁTICOS
 # ─────────────────────────────────────────
+perc_ato = (ato_urba / valor_proposta * 100) if valor_proposta > 0 else 0
+perc_comprometimento = (primeira_mensal / renda_total * 100) if renda_total > 0 else 0
+faixa_comp = faixa_comprometimento(perc_comprometimento)
+faixa_at = faixa_ato(perc_ato)
+faixa_rd = faixa_renda(renda_total)
 
-pct_ato  = (ato_valor / valor_proposta * 100) if valor_proposta > 0 else 0
-comp_pct = (primeira_mensal / renda_total * 100) if renda_total > 0 else 0
+# Abreviações para os cards
+ABREV_RENDA = {
+    "ACIMA DE R$ 15.000":    "> R$ 15k",
+    "R$ 10.001 A R$ 15.000": "R$ 10k-15k",
+    "R$ 7.501 A R$ 10.000":  "R$ 7,5k-10k",
+    "R$ 5.001 A R$ 7.500":   "R$ 5k-7,5k",
+    "R$ 2.501 A R$ 5.000":   "R$ 2,5k-5k",
+    "ATÉ R$ 2.500":          "< R$ 2,5k",
+}
 
-nota_idade = classificar_idade(data_nasc)
-nota_ato   = classificar_ato(pct_ato)
-nota_score = classificar_score(melhor_score)
-nota_renda, faixa_renda_str = classificar_faixa_renda(renda_total)
-nota_plano = classificar_plano(plano)
-nota_ec    = classificar_estado_civil(estado_civil)
-nota_tp    = classificar_tipo_produto(TIPO_PRODUTO)
-nota_comp, faixa_comp_str = classificar_comprometimento(comp_pct)
+st.divider()
+col5, col6, col7, col8 = st.columns(4)
+col5.metric("📊 % do Ato",              f"{perc_ato:.1f}%",              faixa_at)
+col6.metric("📉 Comprometimento",        f"{perc_comprometimento:.1f}%",  faixa_comp)
+col7.metric("💵 Renda Total",            f"R$ {renda_total:,.2f}",        ABREV_RENDA.get(faixa_rd, faixa_rd))
+col8.metric("🎂 Faixa Etária",           faixa)
 
-score_total = calcular_score_total(
-    nota_idade, nota_ato, nota_score,
-    nota_renda, nota_plano, nota_ec,
-    nota_tp, nota_comp
+# ─────────────────────────────────────────
+# BOTÃO CALCULAR
+# ─────────────────────────────────────────
+st.divider()
+
+campos_ok = (
+    empreendimento and
+    unidade and
+    tipo_produto and
+    score_consolidado and
+    renda_total > 0
 )
-classificacao, tipo_alerta = classificar_venda(score_total)
 
-# ─────────────────────────────────────────
-# PAINEL DE RESULTADOS
-# ─────────────────────────────────────────
+if not campos_ok:
+    st.info("ℹ️ Preencha todos os campos obrigatórios para calcular o score.")
 
-st.header("📊 Resultado do Score de Venda")
+if st.button("🎯 CALCULAR SCORE DA VENDA", use_container_width=True, type="primary", disabled=not campos_ok):
 
-col1, col2, col3 = st.columns(3)
-col1.metric("% do Ato", f"{pct_ato:.1f}%")
-col2.metric("Comprometimento de Renda", f"{comp_pct:.1f}%", faixa_comp_str)
-col3.metric("Faixa Etária", faixa_idade_str(data_nasc))
+    notas = {
+        "score_credito":         NOTAS_SCORE.get(score_consolidado, 0),
+        "ato":                   NOTAS_ATO.get(faixa_at, 0),
+        "comprometimento_renda": NOTAS_COMPROMETIMENTO.get(faixa_comp, 0),
+        "faixa_renda":           NOTAS_RENDA.get(faixa_rd, 0),
+        "plano":                 NOTAS_PLANO.get(plano, 0),
+        "tipo_produto":          NOTAS_TIPO_PRODUTO.get(tipo_produto, 0),
+        "idade":                 NOTAS_IDADE.get(faixa, 0),
+        "estado_civil":          NOTAS_ESTADO_CIVIL.get(estado_civil, 0),
+    }
 
-col4, col5, col6 = st.columns(3)
-col4.metric("Renda Total", f"R$ {renda_total:,.2f}")
-col5.metric("Faixa de Renda", faixa_renda_str)
-col6.metric("Score SPC", melhor_score)
+    score_final = calcular_score_total(notas)
+    classificacao, cor = classificar(score_final)
 
-st.markdown("---")
+    st.divider()
+    st.subheader("📊 Resultado do Score")
 
-col_score_res, col_class_res = st.columns(2)
-col_score_res.metric("🏆 Score Total", f"{score_total} / 130")
-col_class_res.metric("🎯 Classificação da Venda", classificacao)
+    col9, col10 = st.columns([1, 2])
+    with col9:
+        st.metric("Score Final", f"{score_final} / {SCORE_MAX}")
+        if cor == "green":
+            st.success(f"### {classificacao}")
+        elif cor == "orange":
+            st.warning(f"### {classificacao}")
+        else:
+            st.error(f"### {classificacao}")
 
-if tipo_alerta == "success":
-    st.success(f"✅ {classificacao} — Score: {score_total}/130")
-elif tipo_alerta == "warning":
-    st.warning(f"⚠️ {classificacao} — Score: {score_total}/130")
-else:
-    st.error(f"🚨 {classificacao} — Score: {score_total}/130")
+    with col10:
+        st.markdown("**Detalhamento por variável:**")
+        detalhes = []
+        for k, peso in PESOS.items():
+            nota = notas[k]
+            contribuicao = nota * peso
+            detalhes.append({
+                "Variável":      k.replace("_", " ").title(),
+                "Nota":          nota,
+                "Peso":          peso,
+                "Contribuição":  contribuicao,
+            })
+        st.dataframe(pd.DataFrame(detalhes), use_container_width=True, hide_index=True)
 
-# ─────────────────────────────────────────
-# SUGESTÕES INTELIGENTES DE MELHORIA
-# ─────────────────────────────────────────
+    # ── SUGESTÕES INTELIGENTES ────────────────────────────────────
+    if cor in ("red", "orange"):
+        st.divider()
+        titulo = "💡 Sugestões para sair do ALTO RISCO" if cor == "red" else "⚠️ Pontos de Melhoria"
+        st.subheader(titulo)
 
-sugs = gerar_sugestoes(nota_ato, nota_score, nota_renda, nota_plano, nota_comp, score_total)
-if sugs:
-    st.markdown("---")
-    st.subheader("💡 Estratégias para Reduzir o Risco")
-    for s in sugs:
-        st.markdown(s)
+        falta_moderado = max(0, LIMITE_MODERADO - score_final)
+        falta_baixo    = max(0, LIMITE_BAIXO - score_final)
 
-# ─────────────────────────────────────────
-# DETALHAMENTO DAS NOTAS
-# ─────────────────────────────────────────
+        if cor == "red":
+            st.markdown(f"- Faltam **{falta_moderado} pontos** para RISCO MODERADO")
+            st.markdown(f"- Faltam **{falta_baixo} pontos** para BAIXO RISCO")
+        else:
+            st.markdown(f"- Faltam **{falta_baixo} pontos** para BAIXO RISCO")
 
-with st.expander("🔍 Ver detalhamento das notas por variável"):
-    df_notas = pd.DataFrame({
-        "Variável": [
-            "Idade", "Ato (%)", "Score SPC",
-            "Faixa de Renda", "Plano",
-            "Estado Civil", "Tipo de Produto",
-            "Comprometimento de Renda"
-        ],
-        "Peso": [1, 5, 5, 4, 4, 1, 3, 4],
-        "Nota (1-5)": [
-            nota_idade, nota_ato, nota_score,
-            nota_renda, nota_plano,
-            nota_ec, nota_tp, nota_comp
-        ],
-        "Pontuação": [
-            nota_idade * 1, nota_ato * 5, nota_score * 5,
-            nota_renda * 4, nota_plano * 4,
-            nota_ec * 1, nota_tp * 3, nota_comp * 4
-        ],
-    })
-    total_row = pd.DataFrame([{
-        "Variável": "TOTAL",
-        "Peso": 27,
-        "Nota (1-5)": "—",
-        "Pontuação": score_total
-    }])
-    df_notas = pd.concat([df_notas, total_row], ignore_index=True)
-    st.dataframe(df_notas, use_container_width=True, hide_index=True)
+        sugestoes = []
 
-# ─────────────────────────────────────────
-# SALVAR HISTÓRICO
-# ─────────────────────────────────────────
+        # Score de crédito
+        if notas["score_credito"] < 5:
+            ganho = (5 - notas["score_credito"]) * PESOS["score_credito"]
+            sugestoes.append((ganho, f"📋 **Score de Crédito ({score_consolidado})** → Incluir titular com score A-B pode ganhar até **+{ganho} pontos**"))
 
-st.markdown("---")
-if st.button("💾 Salvar Simulação no Histórico", use_container_width=True, type="primary"):
+        # Comprometimento de renda
+        if notas["comprometimento_renda"] < 5:
+            ganho = (5 - notas["comprometimento_renda"]) * PESOS["comprometimento_renda"]
+            sugestoes.append((ganho, f"📉 **Comprometimento de Renda ({faixa_comp})** → Composição de renda ou redução da mensal pode ganhar até **+{ganho} pontos**"))
+
+        # Ato
+        if notas["ato"] < 5:
+            ganho = (5 - notas["ato"]) * PESOS["ato"]
+            sugestoes.append((ganho, f"💰 **% do Ato ({faixa_at})** → Aumentar o Ato Urba para acima de 4% pode ganhar até **+{ganho} pontos**"))
+
+        # Faixa de renda
+        if notas["faixa_renda"] < 5:
+            ganho = (5 - notas["faixa_renda"]) * PESOS["faixa_renda"]
+            sugestoes.append((ganho, f"💵 **Faixa de Renda ({ABREV_RENDA.get(faixa_rd, faixa_rd)})** → Composição com mais titulares pode ganhar até **+{ganho} pontos**"))
+
+        # Plano
+        if notas["plano"] < 5:
+            ganho = (5 - notas["plano"]) * PESOS["plano"]
+            sugestoes.append((ganho, f"📅 **Plano ({plano})** → Migrar para plano de menor prazo pode ganhar até **+{ganho} pontos**"))
+
+        # Ordenar por maior ganho
+        sugestoes.sort(key=lambda x: x[0], reverse=True)
+        for _, texto in sugestoes:
+            st.markdown(f"- {texto}")
+
+    # ── SALVAR HISTÓRICO ──────────────────────────────────────────
     dados_registro = {
-        "Data/Hora": datetime.now().strftime("%d/%m/%Y %H:%M"),
-        "Empreendimento": EMPREENDIMENTO,
-        "Unidade": unidade,
-        "Tipo Produto": TIPO_PRODUTO,
-        "Faixa Etária": faixa_idade_str(data_nasc),
-        "Estado Civil": estado_civil,
-        "Score SPC Consolidado": melhor_score,
-        "Qtd Clientes": 1 + len(scores_adicionais),
-        "Renda Total (R$)": round(renda_total, 2),
-        "Faixa de Renda": faixa_renda_str,
-        "Ato (R$)": round(ato_valor, 2),
-        "% Ato": round(pct_ato, 1),
-        "Valor Proposta (R$)": round(valor_proposta, 2),
-        "Plano": plano,
-        "1ª Mensal (R$)": round(primeira_mensal, 2),
-        "% Comprometimento": round(comp_pct, 1),
-        "Faixa Comprometimento": faixa_comp_str,
-        "Score Total": score_total,
-        "Classificação": classificacao,
+        "Data":                  datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "Empreendimento":        empreendimento,
+        "Unidade":               unidade,
+        "Tipo Produto":          tipo_produto,
+        "Idade":                 idade,
+        "Faixa Etária":          faixa,
+        "Estado Civil":          estado_civil,
+        "Score Crédito":         score_consolidado,
+        "% Ato":                 round(perc_ato, 1),
+        "Faixa Ato":             faixa_at,
+        "Plano":                 plano,
+        "Renda Total":           renda_total,
+        "1ª Mensal":             primeira_mensal,
+        "% Comprometimento":     round(perc_comprometimento, 1),
+        "Faixa Comprometimento": faixa_comp,
+        "Faixa Renda":           faixa_rd,
+        "Score Final":           score_final,
+        "Classificação":         classificacao,
     }
     salvar_historico(dados_registro)
-    st.success("✅ Simulação salva com sucesso no histórico!")
+    st.success("✅ Simulação salva no histórico!")
 
 # ─────────────────────────────────────────
-# HISTÓRICO DE SIMULAÇÕES
+# HISTÓRICO
 # ─────────────────────────────────────────
-
-st.markdown("---")
+st.divider()
 with st.expander("📂 Ver Histórico de Simulações"):
     if os.path.exists("historico.csv"):
         df_hist = pd.read_csv("historico.csv")
         st.dataframe(df_hist, use_container_width=True, hide_index=True)
-        csv_bytes = df_hist.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "⬇️ Baixar Histórico em CSV",
-            csv_bytes,
-            "historico_simulacoes.csv",
-            "text/csv"
-        )
+        csv = df_hist.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Baixar Histórico em CSV", csv, "historico_simulacoes.csv", "text/csv")
     else:
-        st.info("Nenhuma simulação registrada ainda. Preencha o formulário e clique em 'Salvar Simulação'.")
+        st.info("Nenhuma simulação registrada ainda.")
 
