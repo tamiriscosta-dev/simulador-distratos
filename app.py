@@ -752,8 +752,10 @@ empreendimentos = sorted(
 
 with c1:
     empreendimento = st.selectbox(
-        "Empreendimento *", [""] + empreendimentos,
-        index=0, key="empreendimento_v72"
+        "Empreendimento *",
+        [""] + empreendimentos,
+        index=0,
+        key="empreendimento_v73",
     )
 
 if empreendimento:
@@ -771,12 +773,14 @@ with c2:
         key=lambda x: x.zfill(30),
     )
     unidade = st.selectbox(
-        "Unidade *", [""] + unidades,
-        index=0, disabled=not bool(empreendimento),
-        key="unidade_v72"
+        "Unidade *",
+        [""] + unidades,
+        index=0,
+        disabled=not bool(empreendimento),
+        key="unidade_v73",
     )
 
-# REGRA: Tipo_Produto é amarrado ao Empreendimento.
+# Tipo de Produto é amarrado ao EMPREENDIMENTO no Excel.
 tipo_produto = ""
 if empreendimento and not cad_emp.empty and "Tipo_Produto" in cad_emp.columns:
     serie_tipo = cad_emp["Tipo_Produto"].fillna("").astype(str).str.strip()
@@ -784,14 +788,15 @@ if empreendimento and not cad_emp.empty and "Tipo_Produto" in cad_emp.columns:
     if not serie_tipo.empty:
         tipo_produto = serie_tipo.iloc[0]
 
+# Mantém o terceiro campo exatamente alinhado aos selectboxes.
+# O valor é automático e não pode ser alterado pelo vendedor.
 with c3:
-    st.markdown("**Tipo de Produto**")
-    if tipo_produto:
-        st.success(tipo_produto)
-    elif empreendimento:
-        st.warning("Tipo de Produto não encontrado no cadastro.")
-    else:
-        st.info("Selecione o empreendimento.")
+    st.text_input(
+        "Tipo de Produto",
+        value=tipo_produto,
+        disabled=True,
+        key=f"tipo_produto_v73_{empreendimento}",
+    )
 
 st.divider()
 
@@ -1107,10 +1112,113 @@ if st.button(
 # ============================================================
 # 6. RESULTADO E ESTRATÉGIA
 # ============================================================
+if st.session_state.resultado:
+    d = st.session_state.resultado
+    st.divider()
+    st.subheader("📊 Resultado")
+
+    r1, r2 = st.columns([1, 2])
+
+    st.subheader("🧾 Resumo da Simulação")
+    resumo1, resumo2, resumo3, resumo4 = st.columns(4)
+    resumo1.metric("Empreendimento", d.get("empreendimento", "—"))
+    resumo2.metric("Unidade", d.get("unidade", "—"))
+    resumo3.metric("Tipo de Produto", d.get("tipo_produto", "—"))
+    resumo4.metric("Renda Total", brl(d.get("renda_total", 0)))
+
+    st.subheader("📈 Avaliação de Risco")
+
+    with r1:
+        st.metric("Score Final", f"{d['score_final']} / 130")
+        if d["cor"] == "green":
+            st.success(f"### {d['classificacao']}")
+        elif d["cor"] == "orange":
+            st.warning(f"### {d['classificacao']}")
+        else:
+            st.error(f"### {d['classificacao']}")
+
+    with r2:
+        labels = {
+            "score_credito": "Score de Crédito",
+            "ato": "% do Ato",
+            "comprometimento_renda": "Comprometimento de Renda",
+            "faixa_renda": "Faixa de Renda",
+            "plano": "Plano",
+            "tipo_produto": "Tipo de Produto",
+            "idade": "Faixa Etária",
+            "estado_civil": "Estado Civil",
+        }
+        max_nota = {
+            "score_credito": 5,
+            "ato": 5,
+            "comprometimento_renda": 5,
+            "faixa_renda": 5,
+            "plano": 5,
+            "tipo_produto": 4,
+            "idade": 5,
+            "estado_civil": 3,
+        }
+
+        detalhes = []
+        for var, peso in PESOS.items():
+            nota = d["notas"][var]
+            detalhes.append({
+                "Variável": labels[var],
+                "Nota": f"{nota}/{max_nota[var]}",
+                "Peso": peso,
+                "Pontos": nota * peso,
+                "Máximo": max_nota[var] * peso,
+            })
+
+        st.dataframe(
+            pd.DataFrame(detalhes),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if d["classificacao"] != "🟢 BAIXO RISCO":
+        st.divider()
+        st.subheader("💡 Estratégias de Estruturação da Venda")
+
+        falta_mod = max(0, LIMITE_MODERADO - d["score_final"])
+        falta_baixo = max(0, LIMITE_BAIXO - d["score_final"])
+
+        a, b = st.columns(2)
+        a.metric("Pontos para Risco Moderado", f"+{falta_mod}")
+        b.metric("Pontos para Baixo Risco", f"+{falta_baixo}")
+
+        cenarios = montar_cenarios(
+            score_atual=d["score_final"],
+            notas=d["notas"],
+            renda_total=d["renda_total"],
+            mensal=d["primeira_mensal"],
+            ato=d["ato_urba"],
+            valor_proposta=d["valor_proposta"],
+            plano=d["plano"],
+        )
+
+        if cenarios:
+            df_cenarios = pd.DataFrame(cenarios)
+            df_cenarios["Ganho"] = df_cenarios["Ganho"].map(lambda x: f"+{x}")
+            df_cenarios["NovoScore"] = df_cenarios["NovoScore"].map(lambda x: f"{x}")
+            st.dataframe(
+                df_cenarios[
+                    ["Variável", "Ajuste", "Ganho", "NovoScore", "NovaClassificacao"]
+                ].head(12),
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                "As sugestões são simulações contrafactuais. A V7 não recomenda "
+                "alterar idade, estado civil ou o score cadastral do cliente."
+            )
+
+    # ========================================================
+
 # 7. HISTÓRICO — PILOTO V7.1
 # ============================================================
-if st.session_state.get("resultado_v7"):
-    d = st.session_state["resultado_v7"]
+if st.session_state.get("resultado"):
+    d = st.session_state["resultado"]
 
     st.divider()
     st.subheader("💾 Histórico")
@@ -1138,12 +1246,12 @@ if st.session_state.get("resultado_v7"):
             "Score_Proponente": d.get("score_proponente", ""),
             "Renda_Proponente": d.get("renda_proponente", 0),
             "Renda_Total": d.get("renda_total", 0),
-            "Ato_Urba": d.get("ato", 0),
-            "Percentual_Ato": d.get("pct_ato", 0),
+            "Ato_Urba": d.get("ato_urba", 0),
+            "Percentual_Ato": d.get("perc_ato", 0),
             "Valor_Proposta": d.get("valor_proposta", 0),
             "Plano": d.get("plano", ""),
             "Primeira_Mensal": d.get("primeira_mensal", 0),
-            "Percentual_Comprometimento": d.get("comprometimento", 0),
+            "Percentual_Comprometimento": d.get("perc_comp", 0),
             "Score_Final": d.get("score_final", 0),
             "Classificacao": d.get("classificacao", ""),
         }
@@ -1282,7 +1390,7 @@ else:
 # ============================================================
 st.divider()
 st.caption(
-    "V7.2 — Projeto Defensores do Contrato | "
+    "V7.4 — Projeto Defensores do Contrato | "
     "Score SPC exclusivamente do proponente | Histórico administrativo do piloto"
 )
 
