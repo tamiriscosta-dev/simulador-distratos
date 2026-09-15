@@ -1,13 +1,14 @@
-# app_v6.py
+# app.py — V7
 # Simulador de Score de Vendas — Projeto Defensores do Contrato
-# V6: leitura robusta do PDF SPC + interface sem pré-preenchimentos indevidos
-# + estratégia quantitativa sobre variáveis comercialmente acionáveis.
+# V7: score exclusivamente do proponente + horário de Brasília + histórico por usuário
+# + leitura robusta do SPC + cadastro por empreendimentos.xlsx.
 
 import io
 import os
 import re
 import unicodedata
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -34,7 +35,7 @@ st.divider()
 # IMPORTANTE:
 # O histórico recebido informa que existem 1.583 unidades (quadras 01 a 47),
 # mas não contém, de forma recuperável, a relação completa lote a lote.
-# Para não inventar unidades, a V6 aceita um cadastro externo opcional
+# Para não inventar unidades, a V7 aceita um cadastro externo opcional
 # empreendimentos_unidades.xlsx/csv.
 #
 # Colunas esperadas:
@@ -44,9 +45,16 @@ st.divider()
 # e a unidade pode ser informada/pesquisada manualmente.
 
 ARQUIVOS_CADASTRO = [
-    "empreendimentos_unidades.xlsx",
-    "empreendimentos_unidades.csv",
+    "empreendimentos.xlsx",
 ]
+
+TIMEZONE_BRASILIA = ZoneInfo("America/Sao_Paulo")
+
+# E-mails que terão visão administrativa do histórico.
+# Preencha somente depois de configurar autenticação OIDC no Streamlit.
+ADMINISTRADORES = {
+    # "seu.email@empresa.com.br",
+}
 
 CADASTRO_FALLBACK = pd.DataFrame(
     [{
@@ -222,7 +230,7 @@ def moeda_para_float(valor):
 
 
 def calcular_idade(nascimento):
-    hoje = date.today()
+    hoje = datetime.now(TIMEZONE_BRASILIA).date()
     return hoje.year - nascimento.year - (
         (hoje.month, hoje.day) < (nascimento.month, nascimento.day)
     )
@@ -539,13 +547,54 @@ def montar_cenarios(
     )
 
 
+def obter_usuario_autenticado():
+    """
+    V7: usa st.user somente quando a autenticação OIDC do app disponibiliza
+    a identidade ao código. A lista de viewers do Community Cloud, sozinha,
+    controla acesso ao app, mas não deve ser usada como fonte do e-mail aqui.
+    """
+    try:
+        info = st.user.to_dict()
+    except Exception:
+        info = {}
+
+    email = str(
+        info.get("email")
+        or info.get("preferred_username")
+        or ""
+    ).strip().lower()
+
+    nome = str(
+        info.get("name")
+        or info.get("given_name")
+        or ""
+    ).strip()
+
+    return {
+        "email": email,
+        "nome": nome,
+        "identificado": bool(email),
+        "administrador": bool(email and email in ADMINISTRADORES),
+    }
+
+
+usuario_atual = obter_usuario_autenticado()
+
+
 def salvar_historico(dados):
     arquivo = "historico.csv"
+
+    # Horário oficial da V7: Brasília.
+    dados = dict(dados)
+    dados["Data"] = datetime.now(TIMEZONE_BRASILIA).strftime("%d/%m/%Y %H:%M:%S")
+    dados["Usuario_Email"] = usuario_atual["email"]
+    dados["Usuario_Nome"] = usuario_atual["nome"]
+
     novo = pd.DataFrame([dados])
     if os.path.exists(arquivo):
         antigo = pd.read_csv(arquivo)
         novo = pd.concat([antigo, novo], ignore_index=True)
-    novo.to_csv(arquivo, index=False)
+    novo.to_csv(arquivo, index=False, encoding="utf-8-sig")
 
 
 # ============================================================
@@ -597,7 +646,7 @@ with c3:
     st.text_input("Tipo de Produto", value=tipo_produto, disabled=True)
 
 st.caption(
-    "A V6 está preparada para receber novos empreendimentos por "
+    "A V7 está preparada para receber novos empreendimentos por "
     "`empreendimentos_unidades.xlsx` sem alterar o código."
 )
 st.divider()
@@ -615,7 +664,7 @@ with p1:
         "Data de Nascimento *",
         value=None,
         min_value=date(1930, 1, 1),
-        max_value=date.today(),
+        max_value=datetime.now(TIMEZONE_BRASILIA).date(),
         format="DD/MM/YYYY",
     )
 
@@ -715,7 +764,6 @@ qtd_adicionais = st.number_input(
     step=1,
 )
 
-scores_adicionais = []
 rendas_adicionais = []
 
 for i in range(int(qtd_adicionais)):
@@ -760,21 +808,18 @@ for i in range(int(qtd_adicionais)):
                 key=f"renda_manual_{numero}",
             )
 
-        if score_add:
-            scores_adicionais.append(score_add)
+        # O score do cliente adicional NÃO participa da pontuação da venda.
+        # Sua renda presumida participa da composição da renda.
         rendas_adicionais.append(renda_add)
 
-# Premissa herdada do histórico: score consolidado = melhor faixa entre os clientes.
-ORDEM_SCORE = {"A - B": 1, "C - D": 2, "E - F": 3}
-scores_validos = [s for s in [score_proponente] + scores_adicionais if s]
-score_consolidado = (
-    min(scores_validos, key=lambda x: ORDEM_SCORE[x])
-    if scores_validos else None
-)
+# REGRA OFICIAL V7:
+# O score utilizado na análise é EXCLUSIVAMENTE o score do PROPONENTE.
+# Os clientes adicionais participam somente da composição da renda.
+score_analise = score_proponente
 renda_total = renda_proponente + sum(rendas_adicionais)
 
 m1, m2 = st.columns(2)
-m1.metric("Score consolidado", score_consolidado or "—")
+m1.metric("Score usado na análise — Proponente", score_analise or "—")
 m2.metric("Renda total da proposta", brl(renda_total))
 st.divider()
 
@@ -854,8 +899,8 @@ if not estado_civil:
     faltando.append("Estado Civil")
 if not pdf_prop:
     faltando.append("PDF SPC do Proponente")
-if not score_consolidado:
-    faltando.append("Score SPC")
+if not score_analise:
+    faltando.append("Score SPC do Proponente")
 if renda_total <= 0:
     faltando.append("Renda Presumida")
 if valor_proposta <= 0:
@@ -877,7 +922,7 @@ if st.button(
     disabled=bool(faltando),
 ):
     notas = {
-        "score_credito": NOTAS_SCORE[score_consolidado],
+        "score_credito": NOTAS_SCORE[score_analise],
         "ato": NOTAS_ATO[faixa_at],
         "comprometimento_renda": NOTAS_COMPROMETIMENTO[faixa_comp],
         "faixa_renda": NOTAS_RENDA[faixa_rd],
@@ -901,7 +946,7 @@ if st.button(
         "idade": idade,
         "faixa_idade": faixa_idade,
         "estado_civil": estado_civil,
-        "score_consolidado": score_consolidado,
+        "score_proponente": score_analise,
         "renda_total": renda_total,
         "ato_urba": ato_urba,
         "valor_proposta": valor_proposta,
@@ -926,7 +971,7 @@ if st.session_state.resultado:
     r1, r2 = st.columns([1, 2])
 
     with r1:
-        st.metric("Score Final", f"{d['score_final']} / {SCORE_MAX}")
+        st.metric("Score Final", f"{d['score_final']} / 130")
         if d["cor"] == "green":
             st.success(f"### {d['classificacao']}")
         elif d["cor"] == "orange":
@@ -1006,7 +1051,7 @@ if st.session_state.resultado:
                 hide_index=True,
             )
             st.caption(
-                "As sugestões são simulações contrafactuais. A V6 não recomenda "
+                "As sugestões são simulações contrafactuais. A V7 não recomenda "
                 "alterar idade, estado civil ou o score cadastral do cliente."
             )
 
@@ -1017,16 +1062,28 @@ if st.session_state.resultado:
     st.subheader("💾 Histórico")
     st.caption("Salve somente propostas/simulações que devam compor o histórico.")
 
-    if st.button("✅ CONFIRMAR E SALVAR NO HISTÓRICO", type="primary"):
+    if not usuario_atual["identificado"]:
+        st.warning(
+            "Histórico individual bloqueado: o app ainda não recebeu o e-mail "
+            "do usuário autenticado. A lista de viewers controla quem entra, "
+            "mas para separar históricos por usuário é necessário configurar "
+            "autenticação OIDC no Streamlit."
+        )
+
+    if st.button(
+        "✅ CONFIRMAR E SALVAR NO HISTÓRICO",
+        type="primary",
+        disabled=not usuario_atual["identificado"],
+    ):
         registro = {
-            "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+            "Data": datetime.now(TIMEZONE_BRASILIA).strftime("%d/%m/%Y %H:%M:%S"),
             "Empreendimento": d["empreendimento"],
             "Unidade": d["unidade"],
             "Tipo Produto": d["tipo_produto"],
             "Idade": d["idade"],
             "Faixa Etária": d["faixa_idade"],
             "Estado Civil": d["estado_civil"],
-            "Score Crédito": d["score_consolidado"],
+            "Score Proponente": d["score_proponente"],
             "Renda Total": d["renda_total"],
             "Ato Urba": d["ato_urba"],
             "Valor Proposta": d["valor_proposta"],
@@ -1042,71 +1099,188 @@ if st.session_state.resultado:
 
 
 # ============================================================
-# 8. VISUALIZAÇÃO DO HISTÓRICO
+# 8. VISUALIZAÇÃO DO HISTÓRICO — V7
 # ============================================================
 st.divider()
 
 with st.expander("📂 Ver Histórico de Simulações Salvas"):
-    if os.path.exists("historico.csv"):
-        hist = pd.read_csv("historico.csv")
-        st.dataframe(hist, use_container_width=True, hide_index=True)
-        st.download_button(
-            "⬇ Baixar Histórico em CSV",
-            hist.to_csv(index=False).encode("utf-8-sig"),
-            "historico_simulacoes.csv",
-            "text/csv",
+    if not usuario_atual["identificado"]:
+        st.info(
+            "O histórico está oculto até que a identidade individual do usuário "
+            "esteja disponível ao app."
         )
+
+    elif os.path.exists("historico.csv"):
+        hist = pd.read_csv("historico.csv")
+
+        # Garante compatibilidade com arquivo criado pela V7.
+        if "Usuario_Email" not in hist.columns:
+            st.warning(
+                "O histórico encontrado é de uma versão anterior e não possui "
+                "identificação de usuário. Para iniciar o uso oficial, exclua "
+                "o historico.csv de testes."
+            )
+        else:
+            hist["Usuario_Email"] = (
+                hist["Usuario_Email"].fillna("").astype(str).str.lower()
+            )
+
+            if usuario_atual["administrador"]:
+                st.success("Visão administrativa — todos os usuários")
+
+                f1, f2, f3 = st.columns(3)
+
+                usuarios = sorted(
+                    [x for x in hist["Usuario_Email"].unique().tolist() if x]
+                )
+                empreendimentos_hist = sorted(
+                    [x for x in hist["Empreendimento"].dropna().astype(str).unique().tolist() if x]
+                )
+                classificacoes = sorted(
+                    [x for x in hist["Classificação"].dropna().astype(str).unique().tolist() if x]
+                ) if "Classificação" in hist.columns else []
+
+                with f1:
+                    filtro_usuario = st.selectbox(
+                        "Usuário",
+                        ["TODOS"] + usuarios,
+                        key="hist_usuario_v7",
+                    )
+                with f2:
+                    filtro_emp = st.selectbox(
+                        "Empreendimento",
+                        ["TODOS"] + empreendimentos_hist,
+                        key="hist_emp_v7",
+                    )
+                with f3:
+                    filtro_class = st.selectbox(
+                        "Classificação",
+                        ["TODAS"] + classificacoes,
+                        key="hist_class_v7",
+                    )
+
+                hist_exibicao = hist.copy()
+
+                if filtro_usuario != "TODOS":
+                    hist_exibicao = hist_exibicao[
+                        hist_exibicao["Usuario_Email"] == filtro_usuario
+                    ]
+                if filtro_emp != "TODOS":
+                    hist_exibicao = hist_exibicao[
+                        hist_exibicao["Empreendimento"].astype(str) == filtro_emp
+                    ]
+                if (
+                    filtro_class != "TODAS"
+                    and "Classificação" in hist_exibicao.columns
+                ):
+                    hist_exibicao = hist_exibicao[
+                        hist_exibicao["Classificação"].astype(str) == filtro_class
+                    ]
+
+                st.dataframe(
+                    hist_exibicao,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                st.download_button(
+                    "⬇ Baixar histórico consolidado",
+                    hist_exibicao.to_csv(index=False).encode("utf-8-sig"),
+                    "historico_simulacoes.csv",
+                    "text/csv",
+                )
+
+            else:
+                hist_usuario = hist[
+                    hist["Usuario_Email"] == usuario_atual["email"]
+                ].copy()
+
+                st.caption(
+                    f"Exibindo somente as simulações de **{usuario_atual['email']}**."
+                )
+
+                if hist_usuario.empty:
+                    st.info("Você ainda não possui simulações salvas.")
+                else:
+                    st.dataframe(
+                        hist_usuario,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+                    st.download_button(
+                        "⬇ Baixar meu histórico",
+                        hist_usuario.to_csv(index=False).encode("utf-8-sig"),
+                        "meu_historico_simulacoes.csv",
+                        "text/csv",
+                    )
     else:
         st.info("Nenhuma simulação salva.")
 
 
-######################################################################
-# NOTAS DE IMPLANTAÇÃO
-######################################################################
-# 
-# V6 — INSTRUÇÕES IMPORTANTES
-# 
-# 1. Renomeie este arquivo para app.py antes de substituir a versão atual no GitHub.
-# 
-# 2. requirements.txt:
-# streamlit
-# pandas
-# openpyxl
-# pdfplumber
-# 
-# 3. LEITURA DO SPC
-# A V6 lê todas as páginas antes de procurar os campos.
-# Score:
-# - procura especificamente "RISCO DE CRÉDITO" e captura a letra A-F.
-# - A/B -> A - B
-# - C/D -> C - D
-# - E/F -> E - F
-# 
-# Renda:
-# - procura prioritariamente a linha "Renda Presumida - SPC Brasil"
-# - usa a coluna/valor monetário dessa ocorrência.
-# - há fallback para a ocorrência "Renda Presumida: R$ ...".
-# 
-# 4. UNIDADES
-# O histórico fornecido informa que a lista original possui 1.583 unidades, quadras 01 a 47,
-# mas o PDF do histórico não preserva a lista completa de forma confiável: a V5 nele registrada
-# foi truncada até a quadra 10 e inclusive contém comentário pedindo inclusão manual das demais.
-# 
-# Por isso a V6 NÃO inventa lotes.
-# 
-# Para disponibilizar todas as unidades, coloque no mesmo repositório um arquivo:
-# empreendimentos_unidades.xlsx
-# 
-# com exatamente estas colunas:
-# Empreendimento | Unidade | Tipo_Produto
-# 
-# Exemplo:
-# SMART URBA RESERVA | SMART URBA RESERVA - QUADRA 01 - LOTE 0001 | SMART
-# 
-# Assim novos empreendimentos/unidades/produtos entram sem editar app.py.
-# 
-# 5. SCORE MÁXIMO
-# Com as notas e pesos registrados no histórico, o máximo matemático é 127:
-# Score 25 + Ato 25 + Comprometimento 20 + Renda 20 + Plano 20
-# + Produto 12 + Idade 5 + Estado Civil 3 = 130? 
-# ATENÇÃO: essa soma é 130. Se alterar tabelas/pesos, valide novamente.
+# ============================================================
+# 9. STATUS DE ACESSO — V7
+# ============================================================
+with st.sidebar:
+    st.subheader("👤 Usuário")
+
+    if usuario_atual["identificado"]:
+        st.success(usuario_atual["nome"] or usuario_atual["email"])
+        st.caption(usuario_atual["email"])
+        if usuario_atual["administrador"]:
+            st.info("Perfil: ADMINISTRADOR")
+        else:
+            st.caption("Perfil: USUÁRIO")
+    else:
+        st.warning("Identidade individual ainda não configurada.")
+        st.caption(
+            "A lista de viewers continua protegendo o acesso ao app, "
+            "mas não identifica o e-mail para o código."
+        )
+
+
+# ============================================================
+# NOTAS DE IMPLANTAÇÃO — V7
+# ============================================================
+# 1) GitHub:
+#    app.py
+#    empreendimentos.xlsx
+#    requirements.txt
+#
+# 2) requirements.txt:
+#    streamlit>=1.42
+#    pandas
+#    openpyxl
+#    pdfplumber
+#
+# 3) Para começar o uso oficial sem os testes:
+#    exclua historico.csv do repositório antes da publicação oficial.
+#
+# 4) Score:
+#    27–60  = ALTO RISCO
+#    61–89  = RISCO MODERADO
+#    90–130 = BAIXO RISCO
+#
+# 5) Score SPC:
+#    somente o PROPONENTE participa do cálculo.
+#    Clientes adicionais entram somente na composição da renda.
+#
+# 6) Horário:
+#    America/Sao_Paulo.
+#
+# 7) Histórico por usuário:
+#    a lista "Only specific people can view this app" do Community Cloud
+#    controla quem abre o app, mas nas versões atuais não fornece, sozinha,
+#    o e-mail do viewer ao código via st.user.
+#    Para habilitar a segregação por e-mail, configure autenticação OIDC
+#    (Microsoft, Google, Okta etc.) nos Secrets do Streamlit.
+#
+# 8) Administrador:
+#    depois de configurar OIDC, inclua o(s) e-mail(s) em ADMINISTRADORES.
+#
+# 9) Segurança:
+#    nunca coloque client_secret/senhas no GitHub.
+#
+# 10) Persistência:
+#    historico.csv continua sendo solução de PILOTO. Para produção
+#    multiusuário, migre o histórico para armazenamento persistente.
