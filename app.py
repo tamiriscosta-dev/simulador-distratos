@@ -1,6 +1,6 @@
-# app.py — V13.0
+# app.py — V14.0
 # Simulador de Score de Vendas — Projeto Defensores do Contrato
-# V13.0: e-mails autorizados + nascimento do SPC com idade recalculada
+# V14.0: SPC primeiro no perfil + preenchimento automático + tabelas responsivas
 # + leitura robusta do SPC + cadastro por empreendimentos.xlsx.
 
 import io
@@ -1126,77 +1126,76 @@ if st.session_state.get("pagina_v11") == "Simulador":
     # ------------------------- PROPONENTE -------------------------
     with bloco_cliente:
         st.markdown("### 👤 Perfil do Cliente")
-
-        st.markdown("**Data de Nascimento**")
-        st.caption("Será lida automaticamente do SPC do proponente.")
-
-        estado_civil = st.selectbox(
-            "Estado Civil *",
-            ["", "SOLTEIRO(A)", "DIVORCIADO(A)", "CASADO(A)"],
-            index=0,
-            key="estado_civil_v10",
-        )
+        st.caption("Anexe primeiro o SPC. Os dados utilizados no score serão preenchidos automaticamente.")
 
         pdf_prop = st.file_uploader(
             "SPC do Proponente *",
             type=["pdf"],
-            key="pdf_prop_v10",
+            key="pdf_prop_v14",
         )
 
         dados_spc_prop = None
+        score_proponente = None
+        renda_proponente = 0.0
+        nascimento = None
+        idade = None
+        faixa_idade = None
+
         if pdf_prop:
             try:
-                with st.spinner("Lendo SPC..."):
+                with st.spinner("Lendo SPC do proponente..."):
                     dados_spc_prop = extrair_dados_spc(pdf_prop)
-                if dados_spc_prop["score_faixa"]:
-                    st.success(
-                        f"Score: {dados_spc_prop['score_letra']} → "
-                        f"{dados_spc_prop['score_faixa']}"
-                    )
-                else:
-                    st.warning("Score não localizado no SPC.")
-                if dados_spc_prop["renda_presumida"]:
-                    st.success(f"Renda: {brl(dados_spc_prop['renda_presumida'])}")
-                else:
-                    st.warning("Renda Presumida não localizada.")
+
+                score_proponente = dados_spc_prop.get("score_faixa")
+                renda_proponente = float(dados_spc_prop.get("renda_presumida") or 0)
+                nascimento = dados_spc_prop.get("data_nascimento")
+                idade = calcular_idade(nascimento) if nascimento else None
+                faixa_idade = faixa_etaria(idade) if idade is not None else None
+
+                st.markdown("##### Dados identificados no SPC")
+                with st.container(border=True):
+                    if nascimento:
+                        st.caption("Data de Nascimento")
+                        st.markdown(f"**{nascimento.strftime('%d/%m/%Y')}**")
+                        st.caption(f"Idade calculada: **{idade} anos** • Faixa: **{faixa_idade}**")
+                    else:
+                        st.warning("Data de nascimento não localizada no SPC.")
+
+                    st.caption("Score do Proponente")
+                    if score_proponente:
+                        st.markdown(f"**{dados_spc_prop.get('score_letra') or '—'} → {score_proponente}**")
+                    else:
+                        st.warning("Score não localizado no SPC.")
+
+                    st.caption("Renda Presumida")
+                    if renda_proponente > 0:
+                        st.markdown(f"**{brl(renda_proponente)}**")
+                    else:
+                        st.warning("Renda Presumida não localizada no SPC.")
+
             except Exception as e:
                 st.error(f"Falha na leitura do SPC: {e}")
 
-        score_proponente = dados_spc_prop["score_faixa"] if dados_spc_prop else None
-        renda_proponente = (
-            float(dados_spc_prop["renda_presumida"])
-            if dados_spc_prop and dados_spc_prop["renda_presumida"] else 0.0
-        )
-
+        # Preenchimento manual somente como contingência quando o PDF não trouxer o campo.
         if pdf_prop and not score_proponente:
             score_proponente = st.selectbox(
                 "Score SPC — preenchimento manual",
                 ["", "A - B", "C - D", "E - F"],
-                key="score_prop_manual_v10",
+                key="score_prop_manual_v14",
             )
 
         if pdf_prop and renda_proponente <= 0:
             renda_proponente = campo_moeda(
                 "Renda Presumida — preenchimento manual (R$)",
-                "renda_prop_manual_v10",
+                "renda_prop_manual_v14",
             )
 
-        # Do SPC usamos somente a DATA DE NASCIMENTO.
-        # A idade exibida e a faixa etária são recalculadas pelo simulador.
-        nascimento = dados_spc_prop.get("data_nascimento") if dados_spc_prop else None
-        idade = calcular_idade(nascimento) if nascimento else None
-        faixa_idade = faixa_etaria(idade) if idade is not None else None
-
-        if nascimento:
-            st.success(
-                f"Data de Nascimento: {nascimento.strftime('%d/%m/%Y')} "
-                f"• {idade} anos • {faixa_idade}"
-            )
-        elif pdf_prop:
-            st.warning(
-                "Data de nascimento não localizada automaticamente no SPC. "
-                "Confira se o PDF contém o campo Data de Nascimento."
-            )
+        estado_civil = st.selectbox(
+            "Estado Civil *",
+            ["", "SOLTEIRO(A)", "DIVORCIADO(A)", "CASADO(A)"],
+            index=0,
+            key="estado_civil_v14",
+        )
 
     # ------------------------- PROPOSTA -------------------------
     with bloco_proposta:
@@ -1226,7 +1225,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
     # ------------------------- COMPOSIÇÃO DE RENDA -------------------------
     with bloco_renda:
         st.markdown("### 👥 Composição de Renda")
-        st.caption("Adicionais compõem somente a renda. O score da venda é do proponente.")
+        st.caption("Use somente quando houver cliente adicional compondo renda. O score permanece o do proponente.")
 
         qtd_adicionais = st.number_input(
             "Clientes adicionais",
@@ -1437,7 +1436,18 @@ if st.session_state.get("pagina_v11") == "Simulador":
                     "Pontos": nota * peso,
                     "Máximo": max_nota[var] * peso,
                 })
-            st.dataframe(pd.DataFrame(detalhes), use_container_width=True, hide_index=True)
+            st.dataframe(
+                pd.DataFrame(detalhes),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Variável": st.column_config.TextColumn("Variável", width="medium"),
+                    "Nota": st.column_config.TextColumn("Nota", width="small"),
+                    "Peso": st.column_config.NumberColumn("Peso", width="small"),
+                    "Pontos": st.column_config.NumberColumn("Pontos", width="small"),
+                    "Máximo": st.column_config.NumberColumn("Máximo", width="small"),
+                },
+            )
 
         if d["classificacao"] != "🟢 BAIXO RISCO":
             st.divider()
@@ -1464,12 +1474,40 @@ if st.session_state.get("pagina_v11") == "Simulador":
                 df_cenarios = pd.DataFrame(cenarios)
                 df_cenarios["Ganho"] = df_cenarios["Ganho"].map(lambda x: f"+{x}")
                 df_cenarios["NovoScore"] = df_cenarios["NovoScore"].map(lambda x: f"{x}")
+                df_exibicao = df_cenarios[
+                    ["Variável", "Ajuste", "Ganho", "NovoScore", "NovaClassificacao"]
+                ].head(12).rename(columns={
+                    "NovoScore": "Novo Score",
+                    "NovaClassificacao": "Nova Classificação",
+                })
+
                 st.dataframe(
-                    df_cenarios[
-                        ["Variável", "Ajuste", "Ganho", "NovoScore", "NovaClassificacao"]
-                    ].head(12),
+                    df_exibicao,
                     use_container_width=True,
                     hide_index=True,
+                    column_config={
+                        "Variável": st.column_config.TextColumn(
+                            "Variável",
+                            width="medium",
+                            help="Variável comercial simulada",
+                        ),
+                        "Ajuste": st.column_config.TextColumn(
+                            "Ajuste",
+                            width="large",
+                        ),
+                        "Ganho": st.column_config.TextColumn(
+                            "Ganho",
+                            width="small",
+                        ),
+                        "Novo Score": st.column_config.TextColumn(
+                            "Novo Score",
+                            width="small",
+                        ),
+                        "Nova Classificação": st.column_config.TextColumn(
+                            "Nova Classificação",
+                            width="medium",
+                        ),
+                    },
                 )
                 st.caption(
                     "As sugestões são simulações contrafactuais. Não são propostas "
@@ -1691,7 +1729,7 @@ if st.session_state.admin_autenticado_v11 and st.session_state.get("pagina_v11")
     # ============================================================
     st.divider()
     st.caption(
-        "V13.0 — Projeto Defensores do Contrato | "
+        "V14.0 — Projeto Defensores do Contrato | "
         "Score SPC exclusivamente do proponente | Histórico administrativo do piloto"
     )
 
