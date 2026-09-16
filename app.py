@@ -728,6 +728,54 @@ if "resultado" not in st.session_state:
     st.session_state.resultado = None
 
 
+
+# ============================================================
+# FORMATAÇÃO MONETÁRIA BRASILEIRA — V8
+# ============================================================
+def moeda_para_float(valor):
+    """Converte 3.000,00 / 3000,00 / 3000 para float."""
+    texto = str(valor or "").strip().replace("R$", "").replace(" ", "")
+    if not texto:
+        return 0.0
+    if "," in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+    else:
+        # Se houver apenas ponto, aceita como decimal digitado.
+        # A formatação de saída sempre volta ao padrão brasileiro.
+        if texto.count(".") > 1:
+            texto = texto.replace(".", "")
+    try:
+        return max(0.0, float(texto))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def float_para_moeda_input(valor):
+    return f"{float(valor or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _normalizar_campo_moeda(chave):
+    st.session_state[chave] = float_para_moeda_input(
+        moeda_para_float(st.session_state.get(chave, "0,00"))
+    )
+
+
+def campo_moeda(label, chave, valor_inicial=0.0, ajuda=None):
+    """Campo monetário que, ao sair/confirmar, exibe 1.234,56."""
+    if chave not in st.session_state:
+        st.session_state[chave] = float_para_moeda_input(valor_inicial)
+
+    texto = st.text_input(
+        label,
+        key=chave,
+        on_change=_normalizar_campo_moeda,
+        args=(chave,),
+        help=ajuda,
+        placeholder="0,00",
+    )
+    return moeda_para_float(texto)
+
+
 # ============================================================
 # 1. EMPREENDIMENTO
 # ============================================================
@@ -890,11 +938,9 @@ if pdf_prop and not score_proponente:
     )
 
 if pdf_prop and renda_proponente <= 0:
-    renda_proponente = st.number_input(
+    renda_proponente = campo_moeda(
         "Renda Presumida — preenchimento manual (R$)",
-        min_value=0.0,
-        value=0.0,
-        step=100.0,
+        "renda_proponente_manual_v8",
     )
 
 st.divider()
@@ -902,6 +948,12 @@ st.divider()
 
 # ============================================================
 # 3. CLIENTES ADICIONAIS — máximo total de 5 clientes
+# REGRA OFICIAL V8.1 — CLIENTES ADICIONAIS:
+# - manter até 4 clientes adicionais (5 clientes no total);
+# - usar os adicionais SOMENTE para composição da renda;
+# - o score considerado no motor de risco é exclusivamente o do proponente;
+# - não coletar campos extras de "Condições Adicionais".
+
 # ============================================================
 st.subheader("👥 Composição de Renda")
 
@@ -950,11 +1002,9 @@ for i in range(int(qtd_adicionais)):
             )
 
         if pdf_add and renda_add <= 0:
-            renda_add = st.number_input(
+            renda_add = campo_moeda(
                 f"Renda manual — Cliente {numero} (R$)",
-                min_value=0.0,
-                value=0.0,
-                key=f"renda_manual_{numero}",
+                f"renda_manual_{numero}_v8",
             )
 
         # O score do cliente adicional NÃO participa da pontuação da venda.
@@ -981,19 +1031,13 @@ st.subheader("💰 Dados Financeiros")
 f1, f2 = st.columns(2)
 
 with f1:
-    ato_urba = st.number_input(
+    ato_urba = campo_moeda(
         "Ato Urba (R$) *",
-        min_value=0.0,
-        value=0.0,
-        step=100.0,
-        format="%.2f",
+        "ato_urba_v8",
     )
-    valor_proposta = st.number_input(
+    valor_proposta = campo_moeda(
         "Valor da Proposta / Líquido CV (R$) *",
-        min_value=0.0,
-        value=0.0,
-        step=100.0,
-        format="%.2f",
+        "valor_proposta_v8",
     )
 
 with f2:
@@ -1008,12 +1052,9 @@ with f2:
         ],
         index=0,
     )
-    primeira_mensal = st.number_input(
+    primeira_mensal = campo_moeda(
         "Valor da 1ª Mensal (R$) *",
-        min_value=0.0,
-        value=0.0,
-        step=10.0,
-        format="%.2f",
+        "primeira_mensal_v8",
     )
 
 perc_ato = ato_urba / valor_proposta * 100 if valor_proposta > 0 else 0
@@ -1096,6 +1137,9 @@ if st.button(
         "faixa_idade": faixa_idade,
         "estado_civil": estado_civil,
         "score_proponente": score_analise,
+        "renda_proponente": renda_proponente,
+        "qtd_clientes_adicionais": int(qtd_adicionais),
+        "renda_adicionais": sum(rendas_adicionais),
         "renda_total": renda_total,
         "ato_urba": ato_urba,
         "valor_proposta": valor_proposta,
@@ -1110,23 +1154,58 @@ if st.button(
 
 
 # ============================================================
-# 6. RESULTADO E ESTRATÉGIA
+# 6. RESULTADO E ESTRATÉGIA — V8
 # ============================================================
 if st.session_state.resultado:
     d = st.session_state.resultado
+
     st.divider()
-    st.subheader("📊 Resultado")
-
-    r1, r2 = st.columns([1, 2])
-
     st.subheader("🧾 Resumo da Simulação")
-    resumo1, resumo2, resumo3, resumo4 = st.columns(4)
-    resumo1.metric("Empreendimento", d.get("empreendimento", "—"))
-    resumo2.metric("Unidade", d.get("unidade", "—"))
-    resumo3.metric("Tipo de Produto", d.get("tipo_produto", "—"))
-    resumo4.metric("Renda Total", brl(d.get("renda_total", 0)))
+
+    # CSS apenas para impedir estouro de textos e manter os cards alinhados.
+    st.markdown("""
+    <style>
+    div[data-testid="stMetric"] {
+        min-height: 112px;
+        padding: 12px 14px;
+        border: 1px solid rgba(128,128,128,.22);
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    div[data-testid="stMetricLabel"] p {
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+        line-height: 1.15 !important;
+    }
+    div[data-testid="stMetricValue"] {
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+        line-height: 1.12 !important;
+        font-size: clamp(1rem, 1.65vw, 1.55rem) !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    q1, q2, q3, q4 = st.columns(4)
+    q1.metric("Empreendimento", d.get("empreendimento") or "—")
+    q2.metric("Unidade", d.get("unidade") or "—")
+    q3.metric("Tipo de Produto", d.get("tipo_produto") or "—")
+    q4.metric("Renda Total", brl(d.get("renda_total", 0)))
+
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Faixa Etária", d.get("faixa_idade") or "—")
+    p2.metric("Estado Civil", d.get("estado_civil") or "—")
+    p3.metric("Score do Proponente", d.get("score_proponente") or "—")
+    p4.metric("Plano", d.get("plano") or "—")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("% do Ato", f"{d.get('perc_ato', 0):.2f}%")
+    c2.metric("Ato Urba", brl(d.get("ato_urba", 0)))
+    c3.metric("1ª Mensal", brl(d.get("primeira_mensal", 0)))
+    c4.metric("Valor da Proposta", brl(d.get("valor_proposta", 0)))
 
     st.subheader("📈 Avaliação de Risco")
+    r1, r2 = st.columns([1, 2])
 
     with r1:
         st.metric("Score Final", f"{d['score_final']} / 130")
@@ -1158,7 +1237,6 @@ if st.session_state.resultado:
             "idade": 5,
             "estado_civil": 3,
         }
-
         detalhes = []
         for var, peso in PESOS.items():
             nota = d["notas"][var]
@@ -1169,12 +1247,7 @@ if st.session_state.resultado:
                 "Pontos": nota * peso,
                 "Máximo": max_nota[var] * peso,
             })
-
-        st.dataframe(
-            pd.DataFrame(detalhes),
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.dataframe(pd.DataFrame(detalhes), use_container_width=True, hide_index=True)
 
     if d["classificacao"] != "🟢 BAIXO RISCO":
         st.divider()
@@ -1183,9 +1256,9 @@ if st.session_state.resultado:
         falta_mod = max(0, LIMITE_MODERADO - d["score_final"])
         falta_baixo = max(0, LIMITE_BAIXO - d["score_final"])
 
-        a, b = st.columns(2)
-        a.metric("Pontos para Risco Moderado", f"+{falta_mod}")
-        b.metric("Pontos para Baixo Risco", f"+{falta_baixo}")
+        a1, b1 = st.columns(2)
+        a1.metric("Pontos para Risco Moderado", f"+{falta_mod}")
+        b1.metric("Pontos para Baixo Risco", f"+{falta_baixo}")
 
         cenarios = montar_cenarios(
             score_atual=d["score_final"],
@@ -1209,13 +1282,11 @@ if st.session_state.resultado:
                 hide_index=True,
             )
             st.caption(
-                "As sugestões são simulações contrafactuais. A V7 não recomenda "
-                "alterar idade, estado civil ou o score cadastral do cliente."
+                "As sugestões são simulações contrafactuais. Não são propostas "
+                "alterações de idade, estado civil ou score cadastral do cliente."
             )
 
-    # ========================================================
-
-# 7. HISTÓRICO — PILOTO V7.1
+# 7. HISTÓRICO — PILOTO V8
 # ============================================================
 if st.session_state.get("resultado"):
     d = st.session_state["resultado"]
@@ -1223,8 +1294,8 @@ if st.session_state.get("resultado"):
     st.divider()
     st.subheader("💾 Histórico")
     st.caption(
-        "O e-mail identifica o vendedor. Durante o piloto, "
-        "somente o administrador consulta o histórico."
+        "O e-mail identifica o vendedor. Somente o administrador consulta "
+        "o histórico consolidado."
     )
 
     if not email_valido(vendedor_email):
@@ -1232,7 +1303,7 @@ if st.session_state.get("resultado"):
     elif st.button(
         "✅ CONFIRMAR E SALVAR NO HISTÓRICO",
         type="primary",
-        key="salvar_historico_v71",
+        key="salvar_historico_v8",
     ):
         registro = {
             "Data_Hora": datetime.now(TIMEZONE_BRASILIA).strftime("%d/%m/%Y %H:%M:%S"),
@@ -1245,13 +1316,18 @@ if st.session_state.get("resultado"):
             "Estado_Civil": d.get("estado_civil", ""),
             "Score_Proponente": d.get("score_proponente", ""),
             "Renda_Proponente": d.get("renda_proponente", 0),
+            "Qtd_Clientes_Adicionais": d.get("qtd_clientes_adicionais", 0),
+            "Renda_Clientes_Adicionais": d.get("renda_adicionais", 0),
             "Renda_Total": d.get("renda_total", 0),
             "Ato_Urba": d.get("ato_urba", 0),
             "Percentual_Ato": d.get("perc_ato", 0),
+            "Faixa_Ato": d.get("faixa_at", ""),
             "Valor_Proposta": d.get("valor_proposta", 0),
             "Plano": d.get("plano", ""),
             "Primeira_Mensal": d.get("primeira_mensal", 0),
             "Percentual_Comprometimento": d.get("perc_comp", 0),
+            "Faixa_Comprometimento": d.get("faixa_comp", ""),
+            "Faixa_Renda": d.get("faixa_rd", ""),
             "Score_Final": d.get("score_final", 0),
             "Classificacao": d.get("classificacao", ""),
         }
@@ -1262,19 +1338,48 @@ if st.session_state.get("resultado"):
         if os.path.exists(arquivo):
             try:
                 antigo = pd.read_csv(arquivo)
-                novo = pd.concat([antigo, novo], ignore_index=True)
+                # Garante o mesmo esquema mesmo se existir CSV de versão anterior.
+                todas_colunas = list(dict.fromkeys(list(novo.columns) + list(antigo.columns)))
+                novo = pd.concat(
+                    [
+                        antigo.reindex(columns=todas_colunas),
+                        novo.reindex(columns=todas_colunas),
+                    ],
+                    ignore_index=True,
+                )
             except Exception:
                 pass
 
         novo.to_csv(arquivo, index=False, encoding="utf-8-sig")
-        st.success("Simulação salva no histórico temporário do piloto.")
-
+        st.success("Simulação salva no histórico.")
 
 # ============================================================
 # 8. HISTÓRICO ADMINISTRATIVO — PILOTO V7.1
 # ============================================================
 st.divider()
 st.subheader("📂 Histórico de Simulações")
+
+if st.session_state.admin_autenticado_v71:
+    with st.expander("🗑️ Excluir histórico", expanded=False):
+        st.warning(
+            "Esta ação exclui todo o histórico armazenado nesta instância "
+            "do Streamlit e não pode ser desfeita."
+        )
+        confirmar_exclusao = st.checkbox(
+            "Confirmo que desejo excluir TODO o histórico",
+            key="confirmar_exclusao_historico_v8",
+        )
+        if st.button(
+            "🗑️ EXCLUIR TODO O HISTÓRICO",
+            type="primary",
+            disabled=not confirmar_exclusao,
+            key="excluir_historico_v8",
+        ):
+            if os.path.exists("historico.csv"):
+                os.remove("historico.csv")
+            st.session_state.pop("resultado", None)
+            st.success("Histórico excluído. O próximo registro iniciará um novo arquivo.")
+            st.rerun()
 
 if not st.session_state.admin_autenticado_v71:
     st.info(
@@ -1390,7 +1495,7 @@ else:
 # ============================================================
 st.divider()
 st.caption(
-    "V7.4 — Projeto Defensores do Contrato | "
+    "V8.1 — Projeto Defensores do Contrato | "
     "Score SPC exclusivamente do proponente | Histórico administrativo do piloto"
 )
 
