@@ -1,6 +1,6 @@
-# app.py — V10.0
+# app.py — V11.0
 # Simulador de Score de Vendas — Projeto Defensores do Contrato
-# V10.0: login obrigatório + layout executivo em painel único
+# V11.0: login vendedor isolado do admin + navegação funcional + textos longos + data ampla
 # + leitura robusta do SPC + cadastro por empreendimentos.xlsx.
 
 import io
@@ -53,8 +53,8 @@ if "usuario_identificado_v10" not in st.session_state:
     st.session_state.usuario_identificado_v10 = False
 if "vendedor_email_confirmado_v10" not in st.session_state:
     st.session_state.vendedor_email_confirmado_v10 = ""
-if "admin_autenticado_v71" not in st.session_state:
-    st.session_state.admin_autenticado_v71 = False
+if "admin_autenticado_v11" not in st.session_state:
+    st.session_state.admin_autenticado_v11 = False
 
 # A aplicação SEMPRE inicia pela identificação do vendedor.
 if not st.session_state.usuario_identificado_v10:
@@ -117,32 +117,32 @@ with st.sidebar:
     if st.button("Trocar usuário", key="trocar_usuario_v10", use_container_width=True):
         st.session_state.usuario_identificado_v10 = False
         st.session_state.vendedor_email_confirmado_v10 = ""
-        st.session_state.admin_autenticado_v71 = False
+        st.session_state.admin_autenticado_v11 = False
         st.session_state.pop("resultado", None)
         st.rerun()
 
     st.divider()
     st.markdown("### 🔐 Administração")
 
-    if not st.session_state.admin_autenticado_v71:
+    if not st.session_state.admin_autenticado_v11:
         senha_digitada = st.text_input(
             "Senha administrativa",
             type="password",
-            key="senha_admin_v71",
+            key="senha_admin_v11",
         )
-        if st.button("Entrar como administrador", key="login_admin_v71", use_container_width=True):
+        if st.button("Entrar como administrador", key="login_admin_v11", use_container_width=True):
             senha_correta = obter_senha_admin()
             if not senha_correta:
                 st.error("A senha administrativa ainda não foi configurada nos Secrets.")
             elif senha_digitada == senha_correta:
-                st.session_state.admin_autenticado_v71 = True
+                st.session_state.admin_autenticado_v11 = True
                 st.rerun()
             else:
                 st.error("Senha administrativa incorreta.")
     else:
         st.success("Perfil: ADMINISTRADOR")
-        if st.button("Sair da administração", key="logout_admin_v71", use_container_width=True):
-            st.session_state.admin_autenticado_v71 = False
+        if st.button("Sair da administração", key="logout_admin_v11", use_container_width=True):
+            st.session_state.admin_autenticado_v11 = False
             st.rerun()
 
 
@@ -231,6 +231,17 @@ div[data-testid="stMetricValue"] {
     margin-bottom: 14px;
     font-size: .9rem;
 }
+
+/* V11 — textos longos */
+[data-testid="stVerticalBlockBorderWrapper"] p,
+[data-testid="stVerticalBlockBorderWrapper"] strong {
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+}
+[data-baseweb="select"] span {
+    max-width: 100% !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -242,17 +253,34 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+if "pagina_v11" not in st.session_state:
+    st.session_state.pagina_v11 = "Simulador"
+
 nav1, nav2, nav3 = st.columns([1, 1, 4])
 with nav1:
-    st.button("▣  Simulador", type="primary", use_container_width=True, disabled=True)
+    if st.button(
+        "▣  Simulador",
+        type="primary" if st.session_state.pagina_v11 == "Simulador" else "secondary",
+        use_container_width=True,
+        key="nav_simulador_v11",
+    ):
+        st.session_state.pagina_v11 = "Simulador"
+        st.rerun()
 with nav2:
-    if st.session_state.admin_autenticado_v71:
-        st.button("▣  Histórico", use_container_width=True, disabled=True)
+    if st.session_state.admin_autenticado_v11:
+        if st.button(
+            "▣  Histórico",
+            type="primary" if st.session_state.pagina_v11 == "Histórico" else "secondary",
+            use_container_width=True,
+            key="nav_historico_v11",
+        ):
+            st.session_state.pagina_v11 = "Histórico"
+            st.rerun()
     else:
-        st.button("🔒  Histórico", use_container_width=True, disabled=True)
+        st.button("🔒  Histórico", use_container_width=True, disabled=True, key="nav_hist_bloq_v11")
 with nav3:
-    if st.session_state.admin_autenticado_v71:
-        st.caption("🔐 Área Administrativa ativa")
+    if st.session_state.admin_autenticado_v11:
+        st.caption("🔐 Área Administrativa ativa • Histórico liberado")
     else:
         st.caption("Simulação atual • vendedor identificado")
 st.divider()
@@ -934,639 +962,676 @@ def campo_moeda(label, chave, valor_inicial=0.0, ajuda=None):
     return moeda_para_float(texto)
 
 
-# ============================================================
-# DADOS DA SIMULAÇÃO — LAYOUT EXECUTIVO V10
-# ============================================================
-st.markdown("## 📋 Dados da Simulação")
-st.markdown(
-    '<div class="v9-section-note">Preencha as informações abaixo para calcular o score de risco da venda.</div>',
-    unsafe_allow_html=True,
-)
-
-bloco_emp, bloco_cliente, bloco_proposta, bloco_renda = st.columns(4, gap="large")
-
-# ------------------------- EMPREENDIMENTO -------------------------
-with bloco_emp:
-    st.markdown("### 🏢 Empreendimento")
-
-    if cadastro.empty:
-        st.error("Cadastro de empreendimentos não carregado.")
-        if erro_cadastro:
-            with st.expander("Detalhes técnicos"):
-                st.code(erro_cadastro)
-
-    empreendimentos = sorted(
-        cadastro["Empreendimento"].dropna().astype(str).str.strip()
-        .loc[lambda x: x.ne("")].unique().tolist()
+if st.session_state.get("pagina_v11") == "Simulador":
+    # ============================================================
+    # DADOS DA SIMULAÇÃO — LAYOUT EXECUTIVO V10
+    # ============================================================
+    st.markdown("## 📋 Dados da Simulação")
+    st.markdown(
+        '<div class="v9-section-note">Preencha as informações abaixo para calcular o score de risco da venda.</div>',
+        unsafe_allow_html=True,
     )
 
-    empreendimento = st.selectbox(
-        "Empreendimento *",
-        [""] + empreendimentos,
-        index=0,
-        key="empreendimento_v10",
-    )
+    bloco_emp, bloco_cliente, bloco_proposta, bloco_renda = st.columns(4, gap="large")
 
-    if empreendimento:
-        cad_emp = cadastro[
-            cadastro["Empreendimento"].astype(str).str.strip()
-            == str(empreendimento).strip()
-        ].copy()
-    else:
-        cad_emp = cadastro.iloc[0:0].copy()
+    # ------------------------- EMPREENDIMENTO -------------------------
+    with bloco_emp:
+        st.markdown("### 🏢 Empreendimento")
 
-    unidades = sorted(
-        cad_emp["Unidade"].dropna().astype(str).str.strip()
-        .loc[lambda x: x.ne("")].unique().tolist(),
-        key=lambda x: x.zfill(30),
-    )
-    unidade = st.selectbox(
-        "Unidade *",
-        [""] + unidades,
-        index=0,
-        disabled=not bool(empreendimento),
-        key="unidade_v10",
-    )
+        if cadastro.empty:
+            st.error("Cadastro de empreendimentos não carregado.")
+            if erro_cadastro:
+                with st.expander("Detalhes técnicos"):
+                    st.code(erro_cadastro)
 
-    tipo_produto = ""
-    if empreendimento and not cad_emp.empty and "Tipo_Produto" in cad_emp.columns:
-        serie_tipo = cad_emp["Tipo_Produto"].fillna("").astype(str).str.strip()
-        serie_tipo = serie_tipo[serie_tipo.ne("")]
-        if not serie_tipo.empty:
-            tipo_produto = serie_tipo.iloc[0]
-
-    st.text_input(
-        "Tipo de Produto",
-        value=tipo_produto,
-        disabled=True,
-        key=f"tipo_produto_v10_{empreendimento}",
-    )
-
-# ------------------------- PROPONENTE -------------------------
-with bloco_cliente:
-    st.markdown("### 👤 Perfil do Cliente")
-
-    nascimento = st.date_input(
-        "Data de Nascimento *",
-        value=None,
-        min_value=date(1930, 1, 1),
-        max_value=datetime.now(TIMEZONE_BRASILIA).date(),
-        format="DD/MM/YYYY",
-        key="nascimento_v10",
-    )
-    idade = calcular_idade(nascimento) if nascimento else None
-    faixa_idade = faixa_etaria(idade) if idade is not None else None
-    if idade is not None:
-        st.caption(f"{idade} anos • {faixa_idade}")
-
-    estado_civil = st.selectbox(
-        "Estado Civil *",
-        ["", "SOLTEIRO(A)", "DIVORCIADO(A)", "CASADO(A)"],
-        index=0,
-        key="estado_civil_v10",
-    )
-
-    pdf_prop = st.file_uploader(
-        "SPC do Proponente *",
-        type=["pdf"],
-        key="pdf_prop_v10",
-    )
-
-    dados_spc_prop = None
-    if pdf_prop:
-        try:
-            with st.spinner("Lendo SPC..."):
-                dados_spc_prop = extrair_dados_spc(pdf_prop)
-            if dados_spc_prop["score_faixa"]:
-                st.success(
-                    f"Score: {dados_spc_prop['score_letra']} → "
-                    f"{dados_spc_prop['score_faixa']}"
-                )
-            else:
-                st.warning("Score não localizado no SPC.")
-            if dados_spc_prop["renda_presumida"]:
-                st.success(f"Renda: {brl(dados_spc_prop['renda_presumida'])}")
-            else:
-                st.warning("Renda Presumida não localizada.")
-        except Exception as e:
-            st.error(f"Falha na leitura do SPC: {e}")
-
-    score_proponente = dados_spc_prop["score_faixa"] if dados_spc_prop else None
-    renda_proponente = (
-        float(dados_spc_prop["renda_presumida"])
-        if dados_spc_prop and dados_spc_prop["renda_presumida"] else 0.0
-    )
-
-    if pdf_prop and not score_proponente:
-        score_proponente = st.selectbox(
-            "Score SPC — preenchimento manual",
-            ["", "A - B", "C - D", "E - F"],
-            key="score_prop_manual_v10",
+        empreendimentos = sorted(
+            cadastro["Empreendimento"].dropna().astype(str).str.strip()
+            .loc[lambda x: x.ne("")].unique().tolist()
         )
 
-    if pdf_prop and renda_proponente <= 0:
-        renda_proponente = campo_moeda(
-            "Renda Presumida — preenchimento manual (R$)",
-            "renda_prop_manual_v10",
+        empreendimento = st.selectbox(
+            "Empreendimento *",
+            [""] + empreendimentos,
+            index=0,
+            key="empreendimento_v10",
         )
 
-# ------------------------- PROPOSTA -------------------------
-with bloco_proposta:
-    st.markdown("### 📄 Dados da Proposta")
-
-    ato_urba = campo_moeda("Ato Urba (R$) *", "ato_urba_v10")
-    valor_proposta = campo_moeda(
-        "Valor da Proposta / Líquido CV (R$) *",
-        "valor_proposta_v10",
-    )
-    plano = st.selectbox(
-        "Plano *",
-        [
-            "",
-            "CURTO PRAZO (1 A 48X)",
-            "MÉDIO PRAZO (49 A 70X)",
-            "MÉDIO LONGO (71 A 144X)",
-            "LONGO PRAZO (145 A 180X)",
-        ],
-        key="plano_v10",
-    )
-    primeira_mensal = campo_moeda(
-        "Valor da 1ª Mensal (R$) *",
-        "primeira_mensal_v10",
-    )
-
-# ------------------------- COMPOSIÇÃO DE RENDA -------------------------
-with bloco_renda:
-    st.markdown("### 👥 Composição de Renda")
-    st.caption("Adicionais compõem somente a renda. O score da venda é do proponente.")
-
-    qtd_adicionais = st.number_input(
-        "Clientes adicionais",
-        min_value=0,
-        max_value=4,
-        value=0,
-        step=1,
-        key="qtd_adicionais_v10",
-    )
-
-    rendas_adicionais = []
-    for i in range(int(qtd_adicionais)):
-        numero = i + 2
-        with st.expander(f"Cliente {numero}", expanded=True):
-            pdf_add = st.file_uploader(
-                f"SPC — Cliente {numero}",
-                type=["pdf"],
-                key=f"pdf_cliente_v10_{numero}",
-            )
-            renda_add = 0.0
-
-            if pdf_add:
-                try:
-                    d_add = extrair_dados_spc(pdf_add)
-                    renda_add = float(d_add["renda_presumida"] or 0)
-                    if renda_add:
-                        st.success(f"Renda: {brl(renda_add)}")
-                    else:
-                        st.warning("Renda não localizada.")
-                except Exception as e:
-                    st.error(f"Falha na leitura: {e}")
-
-            if pdf_add and renda_add <= 0:
-                renda_add = campo_moeda(
-                    f"Renda manual — Cliente {numero} (R$)",
-                    f"renda_manual_v10_{numero}",
-                )
-
-            rendas_adicionais.append(renda_add)
-
-# REGRA OFICIAL: score exclusivamente do proponente.
-score_analise = score_proponente
-renda_total = renda_proponente + sum(rendas_adicionais)
-
-perc_ato = ato_urba / valor_proposta * 100 if valor_proposta > 0 else 0
-perc_comp = primeira_mensal / renda_total * 100 if renda_total > 0 else 0
-
-faixa_at = faixa_ato(perc_ato)
-faixa_comp = faixa_comprometimento(perc_comp)
-faixa_rd = faixa_renda(renda_total)
-
-st.divider()
-
-# Indicadores instantâneos abaixo do formulário.
-i1, i2, i3, i4 = st.columns(4)
-i1.metric("% do Ato", f"{perc_ato:.2f}%", faixa_at)
-i2.metric("Comprometimento", f"{perc_comp:.2f}%", faixa_comp)
-i3.metric("Renda Total", brl(renda_total), ABREV_RENDA[faixa_rd])
-i4.metric("Faixa Etária", faixa_idade or "—")
-
-faltando = []
-if not empreendimento: faltando.append("Empreendimento")
-if not unidade: faltando.append("Unidade")
-if not tipo_produto: faltando.append("Tipo de Produto")
-if not nascimento: faltando.append("Data de Nascimento")
-if not estado_civil: faltando.append("Estado Civil")
-if not pdf_prop: faltando.append("SPC do Proponente")
-if not score_analise: faltando.append("Score SPC do Proponente")
-if renda_total <= 0: faltando.append("Renda Presumida")
-if valor_proposta <= 0: faltando.append("Valor da Proposta")
-if not plano: faltando.append("Plano")
-if primeira_mensal <= 0: faltando.append("1ª Mensal")
-
-if faltando:
-    st.warning("Preencha/valide: **" + ", ".join(faltando) + "**")
-
-_, botao_calc = st.columns([3, 1])
-with botao_calc:
-    calcular = st.button(
-        "📊 CALCULAR SIMULAÇÃO",
-        type="primary",
-        use_container_width=True,
-        disabled=bool(faltando),
-        key="calcular_v10",
-    )
-
-if calcular:
-    notas = {
-        "score_credito": NOTAS_SCORE[score_analise],
-        "ato": NOTAS_ATO[faixa_at],
-        "comprometimento_renda": NOTAS_COMPROMETIMENTO[faixa_comp],
-        "faixa_renda": NOTAS_RENDA[faixa_rd],
-        "plano": NOTAS_PLANO[plano],
-        "tipo_produto": NOTAS_TIPO_PRODUTO.get(tipo_produto, 0),
-        "idade": NOTAS_IDADE[faixa_idade],
-        "estado_civil": NOTAS_ESTADO_CIVIL[estado_civil],
-    }
-    score_final = calcular_score_total(notas)
-    classificacao, cor = classificar(score_final)
-
-    st.session_state.resultado = {
-        "notas": notas,
-        "score_final": score_final,
-        "classificacao": classificacao,
-        "cor": cor,
-        "empreendimento": empreendimento,
-        "unidade": unidade,
-        "tipo_produto": tipo_produto,
-        "idade": idade,
-        "faixa_idade": faixa_idade,
-        "estado_civil": estado_civil,
-        "score_proponente": score_analise,
-        "renda_proponente": renda_proponente,
-        "qtd_clientes_adicionais": int(qtd_adicionais),
-        "renda_adicionais": sum(rendas_adicionais),
-        "renda_total": renda_total,
-        "ato_urba": ato_urba,
-        "valor_proposta": valor_proposta,
-        "perc_ato": perc_ato,
-        "faixa_at": faixa_at,
-        "plano": plano,
-        "primeira_mensal": primeira_mensal,
-        "perc_comp": perc_comp,
-        "faixa_comp": faixa_comp,
-        "faixa_rd": faixa_rd,
-    }
-
-# ============================================================
-# RESULTADO E ESTRATÉGIA — V10
-# ============================================================
-if st.session_state.resultado:
-    d = st.session_state.resultado
-
-    st.divider()
-    st.subheader("🧾 Resumo da Simulação")
-    st.markdown('<div class="v9-section-note">Consolidação dos dados utilizados na avaliação.</div>', unsafe_allow_html=True)
-
-
-
-    q1, q2, q3, q4 = st.columns(4)
-    q1.metric("Empreendimento", d.get("empreendimento") or "—")
-    q2.metric("Unidade", d.get("unidade") or "—")
-    q3.metric("Tipo de Produto", d.get("tipo_produto") or "—")
-    q4.metric("Renda Total", brl(d.get("renda_total", 0)))
-
-    p1, p2, p3, p4 = st.columns(4)
-    p1.metric("Faixa Etária", d.get("faixa_idade") or "—")
-    p2.metric("Estado Civil", d.get("estado_civil") or "—")
-    p3.metric("Score do Proponente", d.get("score_proponente") or "—")
-    p4.metric("Plano", d.get("plano") or "—")
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("% do Ato", f"{d.get('perc_ato', 0):.2f}%")
-    c2.metric("Ato Urba", brl(d.get("ato_urba", 0)))
-    c3.metric("1ª Mensal", brl(d.get("primeira_mensal", 0)))
-    c4.metric("Valor da Proposta", brl(d.get("valor_proposta", 0)))
-
-    st.subheader("📈 Avaliação de Risco")
-    r1, r2 = st.columns([1, 2])
-
-    with r1:
-        st.metric("Score Final", f"{d['score_final']} / 130")
-        if d["cor"] == "green":
-            st.success(f"### {d['classificacao']}")
-        elif d["cor"] == "orange":
-            st.warning(f"### {d['classificacao']}")
+        if empreendimento:
+            cad_emp = cadastro[
+                cadastro["Empreendimento"].astype(str).str.strip()
+                == str(empreendimento).strip()
+            ].copy()
         else:
-            st.error(f"### {d['classificacao']}")
+            cad_emp = cadastro.iloc[0:0].copy()
 
-    with r2:
-        labels = {
-            "score_credito": "Score de Crédito",
-            "ato": "% do Ato",
-            "comprometimento_renda": "Comprometimento de Renda",
-            "faixa_renda": "Faixa de Renda",
-            "plano": "Plano",
-            "tipo_produto": "Tipo de Produto",
-            "idade": "Faixa Etária",
-            "estado_civil": "Estado Civil",
-        }
-        max_nota = {
-            "score_credito": 5,
-            "ato": 5,
-            "comprometimento_renda": 5,
-            "faixa_renda": 5,
-            "plano": 5,
-            "tipo_produto": 4,
-            "idade": 5,
-            "estado_civil": 3,
-        }
-        detalhes = []
-        for var, peso in PESOS.items():
-            nota = d["notas"][var]
-            detalhes.append({
-                "Variável": labels[var],
-                "Nota": f"{nota}/{max_nota[var]}",
-                "Peso": peso,
-                "Pontos": nota * peso,
-                "Máximo": max_nota[var] * peso,
-            })
-        st.dataframe(pd.DataFrame(detalhes), use_container_width=True, hide_index=True)
+        unidades = sorted(
+            cad_emp["Unidade"].dropna().astype(str).str.strip()
+            .loc[lambda x: x.ne("")].unique().tolist(),
+            key=lambda x: x.zfill(30),
+        )
+        unidade = st.selectbox(
+            "Unidade *",
+            [""] + unidades,
+            index=0,
+            disabled=not bool(empreendimento),
+            key="unidade_v11",
+            help="A unidade selecionada aparece por extenso logo abaixo do campo.",
+        )
+        if unidade:
+            st.caption(f"📍 **Unidade selecionada:** {unidade}")
 
-    if d["classificacao"] != "🟢 BAIXO RISCO":
-        st.divider()
-        st.subheader("💡 Estratégias de Estruturação da Venda")
+        tipo_produto = ""
+        if empreendimento and not cad_emp.empty and "Tipo_Produto" in cad_emp.columns:
+            serie_tipo = cad_emp["Tipo_Produto"].fillna("").astype(str).str.strip()
+            serie_tipo = serie_tipo[serie_tipo.ne("")]
+            if not serie_tipo.empty:
+                tipo_produto = serie_tipo.iloc[0]
 
-        falta_mod = max(0, LIMITE_MODERADO - d["score_final"])
-        falta_baixo = max(0, LIMITE_BAIXO - d["score_final"])
-
-        a1, b1 = st.columns(2)
-        a1.metric("Pontos para Risco Moderado", f"+{falta_mod}")
-        b1.metric("Pontos para Baixo Risco", f"+{falta_baixo}")
-
-        cenarios = montar_cenarios(
-            score_atual=d["score_final"],
-            notas=d["notas"],
-            renda_total=d["renda_total"],
-            mensal=d["primeira_mensal"],
-            ato=d["ato_urba"],
-            valor_proposta=d["valor_proposta"],
-            plano=d["plano"],
+        st.text_input(
+            "Tipo de Produto",
+            value=tipo_produto,
+            disabled=True,
+            key=f"tipo_produto_v10_{empreendimento}",
         )
 
-        if cenarios:
-            df_cenarios = pd.DataFrame(cenarios)
-            df_cenarios["Ganho"] = df_cenarios["Ganho"].map(lambda x: f"+{x}")
-            df_cenarios["NovoScore"] = df_cenarios["NovoScore"].map(lambda x: f"{x}")
-            st.dataframe(
-                df_cenarios[
-                    ["Variável", "Ajuste", "Ganho", "NovoScore", "NovaClassificacao"]
-                ].head(12),
-                use_container_width=True,
-                hide_index=True,
+    # ------------------------- PROPONENTE -------------------------
+    with bloco_cliente:
+        st.markdown("### 👤 Perfil do Cliente")
+
+        st.markdown("**Data de Nascimento \***")
+        hoje = datetime.now(TIMEZONE_BRASILIA).date()
+        dcol, mcol, acol = st.columns([0.8, 1.35, 1.05])
+        with dcol:
+            dia_nasc = st.selectbox("Dia", [""] + list(range(1, 32)), key="dia_nasc_v11")
+        with mcol:
+            meses_nasc = {
+                1:"Janeiro",2:"Fevereiro",3:"Março",4:"Abril",5:"Maio",6:"Junho",
+                7:"Julho",8:"Agosto",9:"Setembro",10:"Outubro",11:"Novembro",12:"Dezembro"
+            }
+            mes_nasc = st.selectbox(
+                "Mês", [""] + list(meses_nasc.keys()),
+                format_func=lambda x: "Selecione" if x == "" else meses_nasc[x],
+                key="mes_nasc_v11",
             )
-            st.caption(
-                "As sugestões são simulações contrafactuais. Não são propostas "
-                "alterações de idade, estado civil ou score cadastral do cliente."
+        with acol:
+            anos_nasc = list(range(hoje.year, 1929, -1))
+            ano_nasc = st.selectbox("Ano", [""] + anos_nasc, key="ano_nasc_v11")
+
+        nascimento = None
+        if dia_nasc and mes_nasc and ano_nasc:
+            try:
+                nascimento = date(int(ano_nasc), int(mes_nasc), int(dia_nasc))
+                if nascimento > hoje:
+                    st.error("A data de nascimento não pode estar no futuro.")
+                    nascimento = None
+            except ValueError:
+                st.error("Data de nascimento inválida.")
+
+        idade = calcular_idade(nascimento) if nascimento else None
+        faixa_idade = faixa_etaria(idade) if idade is not None else None
+        if idade is not None:
+            st.caption(f"{idade} anos • {faixa_idade}")
+
+        estado_civil = st.selectbox(
+            "Estado Civil *",
+            ["", "SOLTEIRO(A)", "DIVORCIADO(A)", "CASADO(A)"],
+            index=0,
+            key="estado_civil_v10",
+        )
+
+        pdf_prop = st.file_uploader(
+            "SPC do Proponente *",
+            type=["pdf"],
+            key="pdf_prop_v10",
+        )
+
+        dados_spc_prop = None
+        if pdf_prop:
+            try:
+                with st.spinner("Lendo SPC..."):
+                    dados_spc_prop = extrair_dados_spc(pdf_prop)
+                if dados_spc_prop["score_faixa"]:
+                    st.success(
+                        f"Score: {dados_spc_prop['score_letra']} → "
+                        f"{dados_spc_prop['score_faixa']}"
+                    )
+                else:
+                    st.warning("Score não localizado no SPC.")
+                if dados_spc_prop["renda_presumida"]:
+                    st.success(f"Renda: {brl(dados_spc_prop['renda_presumida'])}")
+                else:
+                    st.warning("Renda Presumida não localizada.")
+            except Exception as e:
+                st.error(f"Falha na leitura do SPC: {e}")
+
+        score_proponente = dados_spc_prop["score_faixa"] if dados_spc_prop else None
+        renda_proponente = (
+            float(dados_spc_prop["renda_presumida"])
+            if dados_spc_prop and dados_spc_prop["renda_presumida"] else 0.0
+        )
+
+        if pdf_prop and not score_proponente:
+            score_proponente = st.selectbox(
+                "Score SPC — preenchimento manual",
+                ["", "A - B", "C - D", "E - F"],
+                key="score_prop_manual_v10",
             )
 
-# 7. HISTÓRICO — PILOTO V8
-# ============================================================
-if st.session_state.get("resultado"):
-    d = st.session_state["resultado"]
+        if pdf_prop and renda_proponente <= 0:
+            renda_proponente = campo_moeda(
+                "Renda Presumida — preenchimento manual (R$)",
+                "renda_prop_manual_v10",
+            )
+
+    # ------------------------- PROPOSTA -------------------------
+    with bloco_proposta:
+        st.markdown("### 📄 Dados da Proposta")
+
+        ato_urba = campo_moeda("Ato Urba (R$) *", "ato_urba_v10")
+        valor_proposta = campo_moeda(
+            "Valor da Proposta / Líquido CV (R$) *",
+            "valor_proposta_v10",
+        )
+        plano = st.selectbox(
+            "Plano *",
+            [
+                "",
+                "CURTO PRAZO (1 A 48X)",
+                "MÉDIO PRAZO (49 A 70X)",
+                "MÉDIO LONGO (71 A 144X)",
+                "LONGO PRAZO (145 A 180X)",
+            ],
+            key="plano_v10",
+        )
+        primeira_mensal = campo_moeda(
+            "Valor da 1ª Mensal (R$) *",
+            "primeira_mensal_v10",
+        )
+
+    # ------------------------- COMPOSIÇÃO DE RENDA -------------------------
+    with bloco_renda:
+        st.markdown("### 👥 Composição de Renda")
+        st.caption("Adicionais compõem somente a renda. O score da venda é do proponente.")
+
+        qtd_adicionais = st.number_input(
+            "Clientes adicionais",
+            min_value=0,
+            max_value=4,
+            value=0,
+            step=1,
+            key="qtd_adicionais_v10",
+        )
+
+        rendas_adicionais = []
+        for i in range(int(qtd_adicionais)):
+            numero = i + 2
+            with st.expander(f"Cliente {numero}", expanded=True):
+                pdf_add = st.file_uploader(
+                    f"SPC — Cliente {numero}",
+                    type=["pdf"],
+                    key=f"pdf_cliente_v10_{numero}",
+                )
+                renda_add = 0.0
+
+                if pdf_add:
+                    try:
+                        d_add = extrair_dados_spc(pdf_add)
+                        renda_add = float(d_add["renda_presumida"] or 0)
+                        if renda_add:
+                            st.success(f"Renda: {brl(renda_add)}")
+                        else:
+                            st.warning("Renda não localizada.")
+                    except Exception as e:
+                        st.error(f"Falha na leitura: {e}")
+
+                if pdf_add and renda_add <= 0:
+                    renda_add = campo_moeda(
+                        f"Renda manual — Cliente {numero} (R$)",
+                        f"renda_manual_v10_{numero}",
+                    )
+
+                rendas_adicionais.append(renda_add)
+
+    # REGRA OFICIAL: score exclusivamente do proponente.
+    score_analise = score_proponente
+    renda_total = renda_proponente + sum(rendas_adicionais)
+
+    perc_ato = ato_urba / valor_proposta * 100 if valor_proposta > 0 else 0
+    perc_comp = primeira_mensal / renda_total * 100 if renda_total > 0 else 0
+
+    faixa_at = faixa_ato(perc_ato)
+    faixa_comp = faixa_comprometimento(perc_comp)
+    faixa_rd = faixa_renda(renda_total)
 
     st.divider()
-    st.subheader("💾 Histórico")
-    st.caption(
-        "O e-mail identifica o vendedor. Somente o administrador consulta "
-        "o histórico consolidado."
-    )
 
-    if not email_valido(vendedor_email):
-        st.warning("Informe um e-mail válido do vendedor para salvar.")
-    elif st.button(
-        "✅ CONFIRMAR E SALVAR NO HISTÓRICO",
-        type="primary",
-        key="salvar_historico_v8",
-    ):
-        registro = {
-            "Data_Hora": datetime.now(TIMEZONE_BRASILIA).strftime("%d/%m/%Y %H:%M:%S"),
-            "Vendedor_Email": vendedor_email,
-            "Empreendimento": d.get("empreendimento", ""),
-            "Unidade": d.get("unidade", ""),
-            "Tipo_Produto": d.get("tipo_produto", ""),
-            "Idade": d.get("idade", ""),
-            "Faixa_Etaria": d.get("faixa_idade", ""),
-            "Estado_Civil": d.get("estado_civil", ""),
-            "Score_Proponente": d.get("score_proponente", ""),
-            "Renda_Proponente": d.get("renda_proponente", 0),
-            "Qtd_Clientes_Adicionais": d.get("qtd_clientes_adicionais", 0),
-            "Renda_Clientes_Adicionais": d.get("renda_adicionais", 0),
-            "Renda_Total": d.get("renda_total", 0),
-            "Ato_Urba": d.get("ato_urba", 0),
-            "Percentual_Ato": d.get("perc_ato", 0),
-            "Faixa_Ato": d.get("faixa_at", ""),
-            "Valor_Proposta": d.get("valor_proposta", 0),
-            "Plano": d.get("plano", ""),
-            "Primeira_Mensal": d.get("primeira_mensal", 0),
-            "Percentual_Comprometimento": d.get("perc_comp", 0),
-            "Faixa_Comprometimento": d.get("faixa_comp", ""),
-            "Faixa_Renda": d.get("faixa_rd", ""),
-            "Score_Final": d.get("score_final", 0),
-            "Classificacao": d.get("classificacao", ""),
+    # Indicadores instantâneos abaixo do formulário.
+    i1, i2, i3, i4 = st.columns(4)
+    i1.metric("% do Ato", f"{perc_ato:.2f}%", faixa_at)
+    i2.metric("Comprometimento", f"{perc_comp:.2f}%", faixa_comp)
+    i3.metric("Renda Total", brl(renda_total), ABREV_RENDA[faixa_rd])
+    i4.metric("Faixa Etária", faixa_idade or "—")
+
+    faltando = []
+    if not empreendimento: faltando.append("Empreendimento")
+    if not unidade: faltando.append("Unidade")
+    if not tipo_produto: faltando.append("Tipo de Produto")
+    if not nascimento: faltando.append("Data de Nascimento")
+    if not estado_civil: faltando.append("Estado Civil")
+    if not pdf_prop: faltando.append("SPC do Proponente")
+    if not score_analise: faltando.append("Score SPC do Proponente")
+    if renda_total <= 0: faltando.append("Renda Presumida")
+    if valor_proposta <= 0: faltando.append("Valor da Proposta")
+    if not plano: faltando.append("Plano")
+    if primeira_mensal <= 0: faltando.append("1ª Mensal")
+
+    if faltando:
+        st.warning("Preencha/valide: **" + ", ".join(faltando) + "**")
+
+    _, botao_calc = st.columns([3, 1])
+    with botao_calc:
+        calcular = st.button(
+            "📊 CALCULAR SIMULAÇÃO",
+            type="primary",
+            use_container_width=True,
+            disabled=bool(faltando),
+            key="calcular_v10",
+        )
+
+    if calcular:
+        notas = {
+            "score_credito": NOTAS_SCORE[score_analise],
+            "ato": NOTAS_ATO[faixa_at],
+            "comprometimento_renda": NOTAS_COMPROMETIMENTO[faixa_comp],
+            "faixa_renda": NOTAS_RENDA[faixa_rd],
+            "plano": NOTAS_PLANO[plano],
+            "tipo_produto": NOTAS_TIPO_PRODUTO.get(tipo_produto, 0),
+            "idade": NOTAS_IDADE[faixa_idade],
+            "estado_civil": NOTAS_ESTADO_CIVIL[estado_civil],
+        }
+        score_final = calcular_score_total(notas)
+        classificacao, cor = classificar(score_final)
+
+        st.session_state.resultado = {
+            "notas": notas,
+            "score_final": score_final,
+            "classificacao": classificacao,
+            "cor": cor,
+            "empreendimento": empreendimento,
+            "unidade": unidade,
+            "tipo_produto": tipo_produto,
+            "idade": idade,
+            "faixa_idade": faixa_idade,
+            "estado_civil": estado_civil,
+            "score_proponente": score_analise,
+            "renda_proponente": renda_proponente,
+            "qtd_clientes_adicionais": int(qtd_adicionais),
+            "renda_adicionais": sum(rendas_adicionais),
+            "renda_total": renda_total,
+            "ato_urba": ato_urba,
+            "valor_proposta": valor_proposta,
+            "perc_ato": perc_ato,
+            "faixa_at": faixa_at,
+            "plano": plano,
+            "primeira_mensal": primeira_mensal,
+            "perc_comp": perc_comp,
+            "faixa_comp": faixa_comp,
+            "faixa_rd": faixa_rd,
         }
 
-        arquivo = "historico.csv"
-        novo = pd.DataFrame([registro])
+    # ============================================================
+    # RESULTADO E ESTRATÉGIA — V10
+    # ============================================================
+    if st.session_state.resultado:
+        d = st.session_state.resultado
 
-        if os.path.exists(arquivo):
-            try:
-                antigo = pd.read_csv(arquivo)
-                # Garante o mesmo esquema mesmo se existir CSV de versão anterior.
-                todas_colunas = list(dict.fromkeys(list(novo.columns) + list(antigo.columns)))
-                novo = pd.concat(
-                    [
-                        antigo.reindex(columns=todas_colunas),
-                        novo.reindex(columns=todas_colunas),
-                    ],
-                    ignore_index=True,
+        st.divider()
+        st.subheader("🧾 Resumo da Simulação")
+        st.markdown('<div class="v9-section-note">Consolidação dos dados utilizados na avaliação.</div>', unsafe_allow_html=True)
+
+
+
+        def resumo_card(coluna, titulo, valor):
+            with coluna:
+                with st.container(border=True):
+                    st.caption(titulo)
+                    st.markdown(f"**{valor if valor not in (None, '') else '—'}**")
+
+        q1, q2, q3, q4 = st.columns(4)
+        resumo_card(q1, "Empreendimento", d.get("empreendimento"))
+        resumo_card(q2, "Unidade", d.get("unidade"))
+        resumo_card(q3, "Tipo de Produto", d.get("tipo_produto"))
+        resumo_card(q4, "Renda Total", brl(d.get("renda_total", 0)))
+
+        p1, p2, p3, p4 = st.columns(4)
+        resumo_card(p1, "Faixa Etária", d.get("faixa_idade"))
+        resumo_card(p2, "Estado Civil", d.get("estado_civil"))
+        resumo_card(p3, "Score do Proponente", d.get("score_proponente"))
+        resumo_card(p4, "Plano", d.get("plano"))
+
+        c1, c2, c3, c4 = st.columns(4)
+        resumo_card(c1, "% do Ato", f"{d.get('perc_ato', 0):.2f}%")
+        resumo_card(c2, "Ato Urba", brl(d.get("ato_urba", 0)))
+        resumo_card(c3, "1ª Mensal", brl(d.get("primeira_mensal", 0)))
+        resumo_card(c4, "Valor da Proposta", brl(d.get("valor_proposta", 0)))
+
+        st.subheader("📈 Avaliação de Risco")
+        r1, r2 = st.columns([1, 2])
+
+        with r1:
+            st.metric("Score Final", f"{d['score_final']} / 130")
+            if d["cor"] == "green":
+                st.success(f"### {d['classificacao']}")
+            elif d["cor"] == "orange":
+                st.warning(f"### {d['classificacao']}")
+            else:
+                st.error(f"### {d['classificacao']}")
+
+        with r2:
+            labels = {
+                "score_credito": "Score de Crédito",
+                "ato": "% do Ato",
+                "comprometimento_renda": "Comprometimento de Renda",
+                "faixa_renda": "Faixa de Renda",
+                "plano": "Plano",
+                "tipo_produto": "Tipo de Produto",
+                "idade": "Faixa Etária",
+                "estado_civil": "Estado Civil",
+            }
+            max_nota = {
+                "score_credito": 5,
+                "ato": 5,
+                "comprometimento_renda": 5,
+                "faixa_renda": 5,
+                "plano": 5,
+                "tipo_produto": 4,
+                "idade": 5,
+                "estado_civil": 3,
+            }
+            detalhes = []
+            for var, peso in PESOS.items():
+                nota = d["notas"][var]
+                detalhes.append({
+                    "Variável": labels[var],
+                    "Nota": f"{nota}/{max_nota[var]}",
+                    "Peso": peso,
+                    "Pontos": nota * peso,
+                    "Máximo": max_nota[var] * peso,
+                })
+            st.dataframe(pd.DataFrame(detalhes), use_container_width=True, hide_index=True)
+
+        if d["classificacao"] != "🟢 BAIXO RISCO":
+            st.divider()
+            st.subheader("💡 Estratégias de Estruturação da Venda")
+
+            falta_mod = max(0, LIMITE_MODERADO - d["score_final"])
+            falta_baixo = max(0, LIMITE_BAIXO - d["score_final"])
+
+            a1, b1 = st.columns(2)
+            a1.metric("Pontos para Risco Moderado", f"+{falta_mod}")
+            b1.metric("Pontos para Baixo Risco", f"+{falta_baixo}")
+
+            cenarios = montar_cenarios(
+                score_atual=d["score_final"],
+                notas=d["notas"],
+                renda_total=d["renda_total"],
+                mensal=d["primeira_mensal"],
+                ato=d["ato_urba"],
+                valor_proposta=d["valor_proposta"],
+                plano=d["plano"],
+            )
+
+            if cenarios:
+                df_cenarios = pd.DataFrame(cenarios)
+                df_cenarios["Ganho"] = df_cenarios["Ganho"].map(lambda x: f"+{x}")
+                df_cenarios["NovoScore"] = df_cenarios["NovoScore"].map(lambda x: f"{x}")
+                st.dataframe(
+                    df_cenarios[
+                        ["Variável", "Ajuste", "Ganho", "NovoScore", "NovaClassificacao"]
+                    ].head(12),
+                    use_container_width=True,
+                    hide_index=True,
                 )
-            except Exception:
-                pass
+                st.caption(
+                    "As sugestões são simulações contrafactuais. Não são propostas "
+                    "alterações de idade, estado civil ou score cadastral do cliente."
+                )
 
-        novo.to_csv(arquivo, index=False, encoding="utf-8-sig")
-        st.success("Simulação salva no histórico.")
+    # 7. HISTÓRICO — PILOTO V8
+    # ============================================================
+    if st.session_state.get("resultado"):
+        d = st.session_state["resultado"]
 
-# ============================================================
-# 8. HISTÓRICO ADMINISTRATIVO — PILOTO V7.1
-# ============================================================
-st.divider()
-st.subheader("📂 Histórico de Simulações")
-
-if st.session_state.admin_autenticado_v71:
-    with st.expander("🗑️ Excluir histórico", expanded=False):
-        st.warning(
-            "Esta ação exclui todo o histórico armazenado nesta instância "
-            "do Streamlit e não pode ser desfeita."
+        st.divider()
+        st.subheader("💾 Histórico")
+        st.caption(
+            "O e-mail identifica o vendedor. Somente o administrador consulta "
+            "o histórico consolidado."
         )
-        confirmar_exclusao = st.checkbox(
-            "Confirmo que desejo excluir TODO o histórico",
-            key="confirmar_exclusao_historico_v8",
-        )
-        if st.button(
-            "🗑️ EXCLUIR TODO O HISTÓRICO",
+
+        if not email_valido(vendedor_email):
+            st.warning("Informe um e-mail válido do vendedor para salvar.")
+        elif st.button(
+            "✅ CONFIRMAR E SALVAR NO HISTÓRICO",
             type="primary",
-            disabled=not confirmar_exclusao,
-            key="excluir_historico_v8",
+            key="salvar_historico_v8",
         ):
-            if os.path.exists("historico.csv"):
-                os.remove("historico.csv")
-            st.session_state.pop("resultado", None)
-            st.success("Histórico excluído. O próximo registro iniciará um novo arquivo.")
-            st.rerun()
+            registro = {
+                "Data_Hora": datetime.now(TIMEZONE_BRASILIA).strftime("%d/%m/%Y %H:%M:%S"),
+                "Vendedor_Email": vendedor_email,
+                "Empreendimento": d.get("empreendimento", ""),
+                "Unidade": d.get("unidade", ""),
+                "Tipo_Produto": d.get("tipo_produto", ""),
+                "Idade": d.get("idade", ""),
+                "Faixa_Etaria": d.get("faixa_idade", ""),
+                "Estado_Civil": d.get("estado_civil", ""),
+                "Score_Proponente": d.get("score_proponente", ""),
+                "Renda_Proponente": d.get("renda_proponente", 0),
+                "Qtd_Clientes_Adicionais": d.get("qtd_clientes_adicionais", 0),
+                "Renda_Clientes_Adicionais": d.get("renda_adicionais", 0),
+                "Renda_Total": d.get("renda_total", 0),
+                "Ato_Urba": d.get("ato_urba", 0),
+                "Percentual_Ato": d.get("perc_ato", 0),
+                "Faixa_Ato": d.get("faixa_at", ""),
+                "Valor_Proposta": d.get("valor_proposta", 0),
+                "Plano": d.get("plano", ""),
+                "Primeira_Mensal": d.get("primeira_mensal", 0),
+                "Percentual_Comprometimento": d.get("perc_comp", 0),
+                "Faixa_Comprometimento": d.get("faixa_comp", ""),
+                "Faixa_Renda": d.get("faixa_rd", ""),
+                "Score_Final": d.get("score_final", 0),
+                "Classificacao": d.get("classificacao", ""),
+            }
 
-if not st.session_state.admin_autenticado_v71:
-    st.info(
-        "O histórico é restrito ao administrador. "
-        "Use a área 🔐 Administração na barra lateral."
-    )
-elif not os.path.exists("historico.csv"):
-    st.info("Nenhuma simulação oficial registrada.")
-else:
-    try:
-        hist = pd.read_csv("historico.csv")
-    except Exception as erro:
-        hist = pd.DataFrame()
-        st.error(f"Não foi possível ler o histórico: {erro}")
+            arquivo = "historico.csv"
+            novo = pd.DataFrame([registro])
 
-    if hist.empty:
+            if os.path.exists(arquivo):
+                try:
+                    antigo = pd.read_csv(arquivo)
+                    # Garante o mesmo esquema mesmo se existir CSV de versão anterior.
+                    todas_colunas = list(dict.fromkeys(list(novo.columns) + list(antigo.columns)))
+                    novo = pd.concat(
+                        [
+                            antigo.reindex(columns=todas_colunas),
+                            novo.reindex(columns=todas_colunas),
+                        ],
+                        ignore_index=True,
+                    )
+                except Exception:
+                    pass
+
+            novo.to_csv(arquivo, index=False, encoding="utf-8-sig")
+            st.success("Simulação salva no histórico.")
+
+
+# ============================================================
+# HISTÓRICO ADMINISTRATIVO — V11
+# Só aparece após autenticação administrativa e ao abrir a aba Histórico.
+# ============================================================
+if st.session_state.admin_autenticado_v11 and st.session_state.get("pagina_v11") == "Histórico":
+    # ============================================================
+    # 8. HISTÓRICO ADMINISTRATIVO — PILOTO V7.1
+    # ============================================================
+    st.divider()
+    st.subheader("📂 Histórico de Simulações")
+
+    if st.session_state.admin_autenticado_v11:
+        with st.expander("🗑️ Excluir histórico", expanded=False):
+            st.warning(
+                "Esta ação exclui todo o histórico armazenado nesta instância "
+                "do Streamlit e não pode ser desfeita."
+            )
+            confirmar_exclusao = st.checkbox(
+                "Confirmo que desejo excluir TODO o histórico",
+                key="confirmar_exclusao_historico_v8",
+            )
+            if st.button(
+                "🗑️ EXCLUIR TODO O HISTÓRICO",
+                type="primary",
+                disabled=not confirmar_exclusao,
+                key="excluir_historico_v8",
+            ):
+                if os.path.exists("historico.csv"):
+                    os.remove("historico.csv")
+                st.session_state.pop("resultado", None)
+                st.success("Histórico excluído. O próximo registro iniciará um novo arquivo.")
+                st.rerun()
+
+    if not st.session_state.admin_autenticado_v11:
+        st.info(
+            "O histórico é restrito ao administrador. "
+            "Use a área 🔐 Administração na barra lateral."
+        )
+    elif not os.path.exists("historico.csv"):
         st.info("Nenhuma simulação oficial registrada.")
     else:
-        # Compatibilidade com arquivo de teste/versão anterior.
-        if "Vendedor_Email" not in hist.columns:
-            hist["Vendedor_Email"] = ""
-        if "Empreendimento" not in hist.columns:
-            hist["Empreendimento"] = ""
-        if "Classificacao" not in hist.columns:
-            if "Classificação" in hist.columns:
-                hist["Classificacao"] = hist["Classificação"]
-            else:
-                hist["Classificacao"] = ""
+        try:
+            hist = pd.read_csv("historico.csv")
+        except Exception as erro:
+            hist = pd.DataFrame()
+            st.error(f"Não foi possível ler o histórico: {erro}")
 
-        st.success("Visão administrativa — histórico consolidado")
+        if hist.empty:
+            st.info("Nenhuma simulação oficial registrada.")
+        else:
+            # Compatibilidade com arquivo de teste/versão anterior.
+            if "Vendedor_Email" not in hist.columns:
+                hist["Vendedor_Email"] = ""
+            if "Empreendimento" not in hist.columns:
+                hist["Empreendimento"] = ""
+            if "Classificacao" not in hist.columns:
+                if "Classificação" in hist.columns:
+                    hist["Classificacao"] = hist["Classificação"]
+                else:
+                    hist["Classificacao"] = ""
 
-        c1, c2, c3 = st.columns(3)
+            st.success("Visão administrativa — histórico consolidado")
 
-        with c1:
-            vendedores = sorted(
-                x for x in hist["Vendedor_Email"].fillna("").astype(str).unique().tolist()
-                if x
+            c1, c2, c3 = st.columns(3)
+
+            with c1:
+                vendedores = sorted(
+                    x for x in hist["Vendedor_Email"].fillna("").astype(str).unique().tolist()
+                    if x
+                )
+                filtro_vendedor = st.selectbox(
+                    "Vendedor",
+                    ["TODOS"] + vendedores,
+                    key="filtro_vendedor_v11",
+                )
+
+            with c2:
+                empreendimentos_hist = sorted(
+                    x for x in hist["Empreendimento"].fillna("").astype(str).unique().tolist()
+                    if x
+                )
+                filtro_emp = st.selectbox(
+                    "Empreendimento",
+                    ["TODOS"] + empreendimentos_hist,
+                    key="filtro_emp_v11",
+                )
+
+            with c3:
+                classes = sorted(
+                    x for x in hist["Classificacao"].fillna("").astype(str).unique().tolist()
+                    if x
+                )
+                filtro_class = st.selectbox(
+                    "Classificação",
+                    ["TODAS"] + classes,
+                    key="filtro_class_v11",
+                )
+
+            exibicao = hist.copy()
+
+            if filtro_vendedor != "TODOS":
+                exibicao = exibicao[exibicao["Vendedor_Email"].astype(str) == filtro_vendedor]
+            if filtro_emp != "TODOS":
+                exibicao = exibicao[exibicao["Empreendimento"].astype(str) == filtro_emp]
+            if filtro_class != "TODAS":
+                exibicao = exibicao[exibicao["Classificacao"].astype(str) == filtro_class]
+
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Simulações", len(exibicao))
+            k2.metric(
+                "Baixo Risco",
+                int(exibicao["Classificacao"].astype(str).str.contains("BAIXO", na=False).sum()),
             )
-            filtro_vendedor = st.selectbox(
-                "Vendedor",
-                ["TODOS"] + vendedores,
-                key="filtro_vendedor_v71",
+            k3.metric(
+                "Moderado",
+                int(exibicao["Classificacao"].astype(str).str.contains("MODERADO", na=False).sum()),
+            )
+            k4.metric(
+                "Alto Risco",
+                int(exibicao["Classificacao"].astype(str).str.contains("ALTO", na=False).sum()),
             )
 
-        with c2:
-            empreendimentos_hist = sorted(
-                x for x in hist["Empreendimento"].fillna("").astype(str).unique().tolist()
-                if x
-            )
-            filtro_emp = st.selectbox(
-                "Empreendimento",
-                ["TODOS"] + empreendimentos_hist,
-                key="filtro_emp_v71",
-            )
+            st.dataframe(exibicao, use_container_width=True, hide_index=True)
 
-        with c3:
-            classes = sorted(
-                x for x in hist["Classificacao"].fillna("").astype(str).unique().tolist()
-                if x
-            )
-            filtro_class = st.selectbox(
-                "Classificação",
-                ["TODAS"] + classes,
-                key="filtro_class_v71",
+            st.download_button(
+                "⬇ BAIXAR HISTÓRICO PARA BACKUP NO ONEDRIVE",
+                exibicao.to_csv(index=False).encode("utf-8-sig"),
+                file_name=(
+                    "historico_score_vendas_"
+                    + datetime.now(TIMEZONE_BRASILIA).strftime("%Y%m%d_%H%M")
+                    + ".csv"
+                ),
+                mime="text/csv",
+                use_container_width=True,
             )
 
-        exibicao = hist.copy()
-
-        if filtro_vendedor != "TODOS":
-            exibicao = exibicao[exibicao["Vendedor_Email"].astype(str) == filtro_vendedor]
-        if filtro_emp != "TODOS":
-            exibicao = exibicao[exibicao["Empreendimento"].astype(str) == filtro_emp]
-        if filtro_class != "TODAS":
-            exibicao = exibicao[exibicao["Classificacao"].astype(str) == filtro_class]
-
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Simulações", len(exibicao))
-        k2.metric(
-            "Baixo Risco",
-            int(exibicao["Classificacao"].astype(str).str.contains("BAIXO", na=False).sum()),
-        )
-        k3.metric(
-            "Moderado",
-            int(exibicao["Classificacao"].astype(str).str.contains("MODERADO", na=False).sum()),
-        )
-        k4.metric(
-            "Alto Risco",
-            int(exibicao["Classificacao"].astype(str).str.contains("ALTO", na=False).sum()),
-        )
-
-        st.dataframe(exibicao, use_container_width=True, hide_index=True)
-
-        st.download_button(
-            "⬇ BAIXAR HISTÓRICO PARA BACKUP NO ONEDRIVE",
-            exibicao.to_csv(index=False).encode("utf-8-sig"),
-            file_name=(
-                "historico_score_vendas_"
-                + datetime.now(TIMEZONE_BRASILIA).strftime("%Y%m%d_%H%M")
-                + ".csv"
-            ),
-            mime="text/csv",
-            use_container_width=True,
-        )
-
-        st.warning(
-            "⚠️ O histórico armazenado no servidor do Streamlit é temporário. "
-            "Faça o backup no OneDrive corporativo."
-        )
+            st.warning(
+                "⚠️ O histórico armazenado no servidor do Streamlit é temporário. "
+                "Faça o backup no OneDrive corporativo."
+            )
 
 
-# ============================================================
-# RODAPÉ
-# ============================================================
-st.divider()
-st.caption(
-    "V10.0 — Projeto Defensores do Contrato | "
-    "Score SPC exclusivamente do proponente | Histórico administrativo do piloto"
-)
+    # ============================================================
+    # RODAPÉ
+    # ============================================================
+    st.divider()
+    st.caption(
+        "V11.0 — Projeto Defensores do Contrato | "
+        "Score SPC exclusivamente do proponente | Histórico administrativo do piloto"
+    )
 
-# ============================================================
-# CONFIGURAÇÃO NECESSÁRIA NO STREAMLIT CLOUD
-# ============================================================
-# Em App > Settings > Secrets:
-#
-# DB_TOKEN = "ESCOLHA_UMA_SENHA_FORTE"
-#
-# Nunca coloque essa senha no GitHub.
-#
-# O arquivo de cadastro esperado é:
-# empreendimentos.xlsx
-#
-# requirements.txt:
-# streamlit
-# pandas
-# openpyxl
-# pdfplumber
-#
-# O historico.csv é temporário. Baixe backups periódicos e salve no OneDrive.
+    # ============================================================
+    # CONFIGURAÇÃO NECESSÁRIA NO STREAMLIT CLOUD
+    # ============================================================
+    # Em App > Settings > Secrets:
+    #
+    # DB_TOKEN = "ESCOLHA_UMA_SENHA_FORTE"
+    #
+    # Nunca coloque essa senha no GitHub.
+    #
+    # O arquivo de cadastro esperado é:
+    # empreendimentos.xlsx
+    #
+    # requirements.txt:
+    # streamlit
+    # pandas
+    # openpyxl
+    # pdfplumber
+    #
+    # O historico.csv é temporário. Baixe backups periódicos e salve no OneDrive.
