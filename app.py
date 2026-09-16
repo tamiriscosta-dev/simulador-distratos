@@ -1,6 +1,6 @@
-# app.py — V11.0
+# app.py — V13.0
 # Simulador de Score de Vendas — Projeto Defensores do Contrato
-# V11.0: login vendedor isolado do admin + navegação funcional + textos longos + data ampla
+# V13.0: e-mails autorizados + nascimento do SPC com idade recalculada
 # + leitura robusta do SPC + cadastro por empreendimentos.xlsx.
 
 import io
@@ -29,6 +29,42 @@ def email_valido(email):
     """Valida somente o formato do e-mail informado no piloto."""
     email = str(email or "").strip().lower()
     return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email))
+
+
+
+def _lista_emails_secret(nome):
+    """Lê e normaliza uma lista de e-mails cadastrada nos Secrets."""
+    try:
+        bruto = st.secrets.get(nome, [])
+    except Exception:
+        bruto = []
+
+    if isinstance(bruto, str):
+        itens = re.split(r"[,;\n]+", bruto)
+    else:
+        try:
+            itens = list(bruto)
+        except Exception:
+            itens = []
+
+    return {str(x).strip().lower() for x in itens if str(x).strip()}
+
+
+def obter_acessos_autorizados():
+    return (
+        _lista_emails_secret("VENDEDORES_AUTORIZADOS"),
+        _lista_emails_secret("ADMINISTRADORES_AUTORIZADOS"),
+    )
+
+
+def perfil_email(email):
+    email = str(email or "").strip().lower()
+    vendedores, administradores = obter_acessos_autorizados()
+    if email in administradores:
+        return "ADMINISTRADOR"
+    if email in vendedores:
+        return "VENDEDOR"
+    return None
 
 
 def obter_senha_admin():
@@ -102,9 +138,19 @@ if not st.session_state.usuario_identificado_v10:
             if not email_valido(email_login):
                 st.error("Informe um e-mail válido para continuar.")
             else:
-                st.session_state.vendedor_email_confirmado_v10 = email_login
-                st.session_state.usuario_identificado_v10 = True
-                st.rerun()
+                vendedores_aut, administradores_aut = obter_acessos_autorizados()
+                if not vendedores_aut and not administradores_aut:
+                    st.error("A lista de usuários autorizados ainda não foi configurada nos Secrets.")
+                else:
+                    perfil = perfil_email(email_login)
+                    if perfil is None:
+                        st.error("E-mail não autorizado. Solicite o cadastro ao responsável pelo simulador.")
+                    else:
+                        st.session_state.vendedor_email_confirmado_v10 = email_login
+                        st.session_state.usuario_identificado_v10 = True
+                        st.session_state.perfil_email_v13 = perfil
+                        st.session_state.admin_autenticado_v11 = False
+                        st.rerun()
     st.stop()
 
 vendedor_email = st.session_state.vendedor_email_confirmado_v10
@@ -117,33 +163,40 @@ with st.sidebar:
     if st.button("Trocar usuário", key="trocar_usuario_v10", use_container_width=True):
         st.session_state.usuario_identificado_v10 = False
         st.session_state.vendedor_email_confirmado_v10 = ""
+        st.session_state.pop("perfil_email_v13", None)
         st.session_state.admin_autenticado_v11 = False
         st.session_state.pop("resultado", None)
         st.rerun()
 
     st.divider()
-    st.markdown("### 🔐 Administração")
+    perfil_atual = perfil_email(vendedor_email)
 
-    if not st.session_state.admin_autenticado_v11:
-        senha_digitada = st.text_input(
-            "Senha administrativa",
-            type="password",
-            key="senha_admin_v11",
-        )
-        if st.button("Entrar como administrador", key="login_admin_v11", use_container_width=True):
-            senha_correta = obter_senha_admin()
-            if not senha_correta:
-                st.error("A senha administrativa ainda não foi configurada nos Secrets.")
-            elif senha_digitada == senha_correta:
-                st.session_state.admin_autenticado_v11 = True
+    if perfil_atual == "ADMINISTRADOR":
+        st.markdown("### 🔐 Administração")
+        if not st.session_state.admin_autenticado_v11:
+            st.caption("E-mail administrativo reconhecido. Informe a senha para liberar o histórico.")
+            senha_digitada = st.text_input(
+                "Senha administrativa",
+                type="password",
+                key="senha_admin_v11",
+            )
+            if st.button("Entrar como administrador", key="login_admin_v11", use_container_width=True):
+                senha_correta = obter_senha_admin()
+                if not senha_correta:
+                    st.error("A senha administrativa ainda não foi configurada nos Secrets.")
+                elif senha_digitada == senha_correta:
+                    st.session_state.admin_autenticado_v11 = True
+                    st.rerun()
+                else:
+                    st.error("Senha administrativa incorreta.")
+        else:
+            st.success("Perfil: ADMINISTRADOR")
+            if st.button("Sair da administração", key="logout_admin_v11", use_container_width=True):
+                st.session_state.admin_autenticado_v11 = False
+                st.session_state.pagina_v11 = "Simulador"
                 st.rerun()
-            else:
-                st.error("Senha administrativa incorreta.")
     else:
-        st.success("Perfil: ADMINISTRADOR")
-        if st.button("Sair da administração", key="logout_admin_v11", use_container_width=True):
-            st.session_state.admin_autenticado_v11 = False
-            st.rerun()
+        st.caption("Perfil: VENDEDOR")
 
 
 # ============================================================
@@ -693,6 +746,27 @@ def extrair_dados_spc(pdf_file):
                 if renda and renda > 0:
                     break
 
+    # 3) DATA DE NASCIMENTO: leitura automática do SPC do proponente.
+    # A busca fica restrita a rótulos explícitos para não confundir com
+    # datas de consulta/emissão do relatório.
+    data_nascimento = None
+    padroes_nascimento = [
+        r"(?:DATA\s+DE\s+NASCIMENTO|DT\.?\s*NASCIMENTO|NASCIMENTO)\s*[:\-]?\s*(\d{1,2}/\d{1,2}/\d{4})",
+        r"(?:DATA\s+DE\s+NASCIMENTO|DT\.?\s*NASCIMENTO|NASCIMENTO)[\s\S]{0,50}?(\d{1,2}/\d{1,2}/\d{4})",
+    ]
+    for padrao in padroes_nascimento:
+        m_nasc = re.search(padrao, texto_norm, flags=re.I)
+        if m_nasc:
+            try:
+                data_nascimento = datetime.strptime(m_nasc.group(1), "%d/%m/%Y").date()
+                hoje_spc = datetime.now(TIMEZONE_BRASILIA).date()
+                if data_nascimento > hoje_spc or data_nascimento.year < 1900:
+                    data_nascimento = None
+                else:
+                    break
+            except ValueError:
+                data_nascimento = None
+
     # Campos adicionais úteis para conferência/estratégia.
     taxa_inadimplencia = None
     m = re.search(
@@ -720,6 +794,7 @@ def extrair_dados_spc(pdf_file):
         "score_letra": score_letra,
         "score_faixa": score_faixa,
         "renda_presumida": renda,
+        "data_nascimento": data_nascimento,
         "taxa_inadimplencia": taxa_inadimplencia,
         "renda_comprometida_spc": renda_comprometida_spc,
         "consultas_30d": consultas_30d,
@@ -1009,16 +1084,30 @@ if st.session_state.get("pagina_v11") == "Simulador":
             .loc[lambda x: x.ne("")].unique().tolist(),
             key=lambda x: x.zfill(30),
         )
+        def rotulo_unidade(valor):
+            if not valor:
+                return "Selecione a unidade"
+            texto = str(valor).strip()
+            emp = str(empreendimento or "").strip()
+            # Se a planilha gravar "EMPREENDIMENTO - QUADRA ...", retiramos
+            # apenas o prefixo visual. O valor original continua sendo salvo.
+            if emp and texto.upper().startswith(emp.upper()):
+                curto = texto[len(emp):].lstrip(" -–—")
+                if curto:
+                    return curto
+            return texto
+
         unidade = st.selectbox(
             "Unidade *",
             [""] + unidades,
             index=0,
             disabled=not bool(empreendimento),
-            key="unidade_v11",
-            help="A unidade selecionada aparece por extenso logo abaixo do campo.",
+            key="unidade_v12",
+            format_func=rotulo_unidade,
+            help="O cadastro completo da unidade continua preservado no histórico.",
         )
         if unidade:
-            st.caption(f"📍 **Unidade selecionada:** {unidade}")
+            st.caption(f"📍 **{rotulo_unidade(unidade)}**")
 
         tipo_produto = ""
         if empreendimento and not cad_emp.empty and "Tipo_Produto" in cad_emp.columns:
@@ -1038,39 +1127,8 @@ if st.session_state.get("pagina_v11") == "Simulador":
     with bloco_cliente:
         st.markdown("### 👤 Perfil do Cliente")
 
-        st.markdown("**Data de Nascimento \***")
-        hoje = datetime.now(TIMEZONE_BRASILIA).date()
-        dcol, mcol, acol = st.columns([0.8, 1.35, 1.05])
-        with dcol:
-            dia_nasc = st.selectbox("Dia", [""] + list(range(1, 32)), key="dia_nasc_v11")
-        with mcol:
-            meses_nasc = {
-                1:"Janeiro",2:"Fevereiro",3:"Março",4:"Abril",5:"Maio",6:"Junho",
-                7:"Julho",8:"Agosto",9:"Setembro",10:"Outubro",11:"Novembro",12:"Dezembro"
-            }
-            mes_nasc = st.selectbox(
-                "Mês", [""] + list(meses_nasc.keys()),
-                format_func=lambda x: "Selecione" if x == "" else meses_nasc[x],
-                key="mes_nasc_v11",
-            )
-        with acol:
-            anos_nasc = list(range(hoje.year, 1929, -1))
-            ano_nasc = st.selectbox("Ano", [""] + anos_nasc, key="ano_nasc_v11")
-
-        nascimento = None
-        if dia_nasc and mes_nasc and ano_nasc:
-            try:
-                nascimento = date(int(ano_nasc), int(mes_nasc), int(dia_nasc))
-                if nascimento > hoje:
-                    st.error("A data de nascimento não pode estar no futuro.")
-                    nascimento = None
-            except ValueError:
-                st.error("Data de nascimento inválida.")
-
-        idade = calcular_idade(nascimento) if nascimento else None
-        faixa_idade = faixa_etaria(idade) if idade is not None else None
-        if idade is not None:
-            st.caption(f"{idade} anos • {faixa_idade}")
+        st.markdown("**Data de Nascimento**")
+        st.caption("Será lida automaticamente do SPC do proponente.")
 
         estado_civil = st.selectbox(
             "Estado Civil *",
@@ -1121,6 +1179,23 @@ if st.session_state.get("pagina_v11") == "Simulador":
             renda_proponente = campo_moeda(
                 "Renda Presumida — preenchimento manual (R$)",
                 "renda_prop_manual_v10",
+            )
+
+        # Do SPC usamos somente a DATA DE NASCIMENTO.
+        # A idade exibida e a faixa etária são recalculadas pelo simulador.
+        nascimento = dados_spc_prop.get("data_nascimento") if dados_spc_prop else None
+        idade = calcular_idade(nascimento) if nascimento else None
+        faixa_idade = faixa_etaria(idade) if idade is not None else None
+
+        if nascimento:
+            st.success(
+                f"Data de Nascimento: {nascimento.strftime('%d/%m/%Y')} "
+                f"• {idade} anos • {faixa_idade}"
+            )
+        elif pdf_prop:
+            st.warning(
+                "Data de nascimento não localizada automaticamente no SPC. "
+                "Confira se o PDF contém o campo Data de Nascimento."
             )
 
     # ------------------------- PROPOSTA -------------------------
@@ -1299,7 +1374,11 @@ if st.session_state.get("pagina_v11") == "Simulador":
 
         q1, q2, q3, q4 = st.columns(4)
         resumo_card(q1, "Empreendimento", d.get("empreendimento"))
-        resumo_card(q2, "Unidade", d.get("unidade"))
+        unidade_resumo = d.get("unidade") or ""
+        emp_resumo = d.get("empreendimento") or ""
+        if emp_resumo and unidade_resumo.upper().startswith(emp_resumo.upper()):
+            unidade_resumo = unidade_resumo[len(emp_resumo):].lstrip(" -–—") or unidade_resumo
+        resumo_card(q2, "Unidade", unidade_resumo)
         resumo_card(q3, "Tipo de Produto", d.get("tipo_produto"))
         resumo_card(q4, "Renda Total", brl(d.get("renda_total", 0)))
 
@@ -1612,7 +1691,7 @@ if st.session_state.admin_autenticado_v11 and st.session_state.get("pagina_v11")
     # ============================================================
     st.divider()
     st.caption(
-        "V11.0 — Projeto Defensores do Contrato | "
+        "V13.0 — Projeto Defensores do Contrato | "
         "Score SPC exclusivamente do proponente | Histórico administrativo do piloto"
     )
 
