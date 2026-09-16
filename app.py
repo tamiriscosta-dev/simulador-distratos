@@ -1126,7 +1126,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
     # ------------------------- PROPONENTE -------------------------
     with bloco_cliente:
         st.markdown("### 👤 Perfil do Cliente")
-        st.caption("Anexe primeiro o SPC. Os dados utilizados no score serão preenchidos automaticamente.")
+        st.caption("Anexe primeiro o relatório do SPC. Os dados utilizados automaticamente.")
 
         pdf_prop = st.file_uploader(
             "SPC do Proponente *",
@@ -1157,7 +1157,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
                     if nascimento:
                         st.caption("Data de Nascimento")
                         st.markdown(f"**{nascimento.strftime('%d/%m/%Y')}**")
-                        st.caption(f"Idade calculada: **{idade} anos** • Faixa: **{faixa_idade}**")
+                        st.caption(f"Idade: **{idade} anos** • Faixa: **{faixa_idade}**")
                     else:
                         st.warning("Data de nascimento não localizada no SPC.")
 
