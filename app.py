@@ -1718,10 +1718,6 @@ if st.session_state.admin_autenticado_v11 and st.session_state.get("pagina_v11")
                 use_container_width=True,
             )
 
-            st.warning(
-                "⚠️ O histórico armazenado no servidor do Streamlit é temporário. "
-                "Faça o backup no OneDrive corporativo."
-            )
 
 
     # ============================================================
