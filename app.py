@@ -1,6 +1,6 @@
-# app.py — V7.1
+# app.py — V9.0
 # Simulador de Score de Vendas — Projeto Defensores do Contrato
-# V7.1: score exclusivamente do proponente + horário de Brasília + histórico por usuário
+# V9.0: redesign executivo + regras funcionais validadas do piloto
 # + leitura robusta do SPC + cadastro por empreendimentos.xlsx.
 
 import io
@@ -13,6 +13,13 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 import pdfplumber
+
+
+st.set_page_config(
+    page_title="Simulador de Score de Vendas",
+    page_icon="🏠",
+    layout="wide",
+)
 
 
 # ============================================================
@@ -46,7 +53,7 @@ if "admin_autenticado_v71" not in st.session_state:
     st.session_state.admin_autenticado_v71 = False
 
 with st.sidebar:
-    st.subheader("👤 Vendedor")
+    st.markdown("### 👤 Identificação")
     vendedor_email = st.text_input(
         "E-mail do vendedor *",
         placeholder="nome@empresa.com.br",
@@ -60,7 +67,7 @@ with st.sidebar:
             st.error("Informe um e-mail válido.")
 
     st.divider()
-    st.subheader("🔐 Administração")
+    st.markdown("### 🔐 Administração")
 
     if not st.session_state.admin_autenticado_v71:
         senha_digitada = st.text_input(
@@ -90,15 +97,98 @@ with st.sidebar:
 # ============================================================
 # CONFIGURAÇÃO
 # ============================================================
-st.set_page_config(
-    page_title="Simulador de Score de Vendas",
-    page_icon="🏠",
-    layout="wide",
-)
 
-st.title("🏠 Simulador de Score de Vendas")
-st.markdown("**Projeto Defensores do Contrato — Avaliação de Risco de Distrato**")
-st.divider()
+# ============================================================
+# IDENTIDADE VISUAL — V9
+# ============================================================
+st.markdown("""
+<style>
+:root {
+  --card-border: rgba(128,128,128,.20);
+  --card-bg: rgba(128,128,128,.045);
+  --muted: rgba(180,188,200,.78);
+}
+.block-container {
+    max-width: 1380px;
+    padding-top: 1.7rem;
+    padding-bottom: 3rem;
+}
+h1, h2, h3 { letter-spacing: -0.02em; }
+[data-testid="stSidebar"] {
+    border-right: 1px solid var(--card-border);
+}
+[data-testid="stVerticalBlockBorderWrapper"] {
+    border-radius: 14px !important;
+    border-color: var(--card-border) !important;
+    background: var(--card-bg);
+}
+div[data-testid="stMetric"] {
+    min-height: 108px;
+    padding: 13px 15px;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    overflow: hidden;
+}
+div[data-testid="stMetricLabel"] p,
+div[data-testid="stMetricValue"] {
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    line-height: 1.15 !important;
+}
+div[data-testid="stMetricValue"] {
+    font-size: clamp(1rem, 1.5vw, 1.45rem) !important;
+}
+.stButton > button, .stDownloadButton > button {
+    border-radius: 9px;
+    min-height: 42px;
+    font-weight: 700;
+}
+[data-baseweb="input"] > div,
+[data-baseweb="select"] > div {
+    border-radius: 9px !important;
+}
+.v9-hero {
+    border: 1px solid var(--card-border);
+    border-radius: 18px;
+    padding: 22px 24px 20px 24px;
+    margin-bottom: 22px;
+    background: linear-gradient(135deg, rgba(35,74,150,.14), rgba(92,52,140,.08));
+}
+.v9-kicker {
+    font-size: .78rem;
+    font-weight: 800;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: #8ea9ff;
+    margin-bottom: 5px;
+}
+.v9-title {
+    font-size: clamp(1.7rem, 3vw, 2.45rem);
+    font-weight: 800;
+    line-height: 1.08;
+    margin: 0;
+}
+.v9-subtitle {
+    color: var(--muted);
+    font-size: .98rem;
+    margin-top: 8px;
+}
+.v9-section-note {
+    color: var(--muted);
+    margin-top: -8px;
+    margin-bottom: 14px;
+    font-size: .9rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<div class="v9-hero">
+  <div class="v9-kicker">Projeto Defensores do Contrato</div>
+  <div class="v9-title">🏠 Simulador de Score de Vendas</div>
+  <div class="v9-subtitle">Avaliação estruturada do risco de distrato no momento da venda.</div>
+</div>
+""", unsafe_allow_html=True)
 
 
 # ============================================================
@@ -780,6 +870,7 @@ def campo_moeda(label, chave, valor_inicial=0.0, ajuda=None):
 # 1. EMPREENDIMENTO
 # ============================================================
 st.subheader("🏗 Dados do Empreendimento")
+st.markdown('<div class="v9-section-note">Selecione o empreendimento e a unidade da proposta.</div>', unsafe_allow_html=True)
 
 if cadastro.empty:
     st.error(
@@ -853,6 +944,7 @@ st.divider()
 # 2. PROPONENTE
 # ============================================================
 st.subheader("👤 Cliente Proponente")
+st.markdown('<div class="v9-section-note">Dados do titular da proposta e leitura do SPC.</div>', unsafe_allow_html=True)
 
 p1, p2 = st.columns(2)
 
@@ -956,6 +1048,7 @@ st.divider()
 
 # ============================================================
 st.subheader("👥 Composição de Renda")
+st.markdown('<div class="v9-section-note">Clientes adicionais participam somente da composição da renda.</div>', unsafe_allow_html=True)
 
 qtd_adicionais = st.number_input(
     "Quantos clientes adicionais participarão da proposta?",
@@ -1027,6 +1120,7 @@ st.divider()
 # 4. DADOS FINANCEIROS
 # ============================================================
 st.subheader("💰 Dados Financeiros")
+st.markdown('<div class="v9-section-note">Condições financeiras consideradas no score da venda.</div>', unsafe_allow_html=True)
 
 f1, f2 = st.columns(2)
 
@@ -1161,30 +1255,9 @@ if st.session_state.resultado:
 
     st.divider()
     st.subheader("🧾 Resumo da Simulação")
+    st.markdown('<div class="v9-section-note">Consolidação dos dados utilizados na avaliação.</div>', unsafe_allow_html=True)
 
-    # CSS apenas para impedir estouro de textos e manter os cards alinhados.
-    st.markdown("""
-    <style>
-    div[data-testid="stMetric"] {
-        min-height: 112px;
-        padding: 12px 14px;
-        border: 1px solid rgba(128,128,128,.22);
-        border-radius: 10px;
-        overflow: hidden;
-    }
-    div[data-testid="stMetricLabel"] p {
-        white-space: normal !important;
-        overflow-wrap: anywhere !important;
-        line-height: 1.15 !important;
-    }
-    div[data-testid="stMetricValue"] {
-        white-space: normal !important;
-        overflow-wrap: anywhere !important;
-        line-height: 1.12 !important;
-        font-size: clamp(1rem, 1.65vw, 1.55rem) !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+
 
     q1, q2, q3, q4 = st.columns(4)
     q1.metric("Empreendimento", d.get("empreendimento") or "—")
@@ -1495,7 +1568,7 @@ else:
 # ============================================================
 st.divider()
 st.caption(
-    "V8.1 — Projeto Defensores do Contrato | "
+    "V9.0 — Projeto Defensores do Contrato | "
     "Score SPC exclusivamente do proponente | Histórico administrativo do piloto"
 )
 
