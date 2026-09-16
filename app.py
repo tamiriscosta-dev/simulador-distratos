@@ -1751,4 +1751,4 @@ if st.session_state.admin_autenticado_v11 and st.session_state.get("pagina_v11")
     # openpyxl
     # pdfplumber
     #
-    # O historico.csv é temporário. Baixe backups periódicos e salve no OneDrive.
+    
