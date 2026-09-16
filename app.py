@@ -1,6 +1,6 @@
-# app.py — V9.0
+# app.py — V10.0
 # Simulador de Score de Vendas — Projeto Defensores do Contrato
-# V9.0: redesign executivo + regras funcionais validadas do piloto
+# V10.0: login obrigatório + layout executivo em painel único
 # + leitura robusta do SPC + cadastro por empreendimentos.xlsx.
 
 import io
@@ -49,22 +49,77 @@ def obter_senha_admin():
         return ""
 
 
+if "usuario_identificado_v10" not in st.session_state:
+    st.session_state.usuario_identificado_v10 = False
+if "vendedor_email_confirmado_v10" not in st.session_state:
+    st.session_state.vendedor_email_confirmado_v10 = ""
 if "admin_autenticado_v71" not in st.session_state:
     st.session_state.admin_autenticado_v71 = False
 
-with st.sidebar:
-    st.markdown("### 👤 Identificação")
-    vendedor_email = st.text_input(
-        "E-mail do vendedor *",
-        placeholder="nome@empresa.com.br",
-        key="vendedor_email_v71",
-    ).strip().lower()
+# A aplicação SEMPRE inicia pela identificação do vendedor.
+if not st.session_state.usuario_identificado_v10:
+    st.markdown("""
+    <style>
+    .login-card {
+        border: 1px solid rgba(128,128,128,.22);
+        border-radius: 18px;
+        padding: 26px 28px 18px 28px;
+        background: rgba(128,128,128,.045);
+        margin-top: 8vh;
+    }
+    .login-kicker {
+        font-size: .78rem; font-weight: 800; letter-spacing: .12em;
+        text-transform: uppercase; opacity: .72;
+    }
+    .login-title { font-size: 2rem; font-weight: 800; margin: 6px 0 6px; }
+    .login-sub { opacity: .72; margin-bottom: 18px; }
+    </style>
+    """, unsafe_allow_html=True)
 
-    if vendedor_email:
-        if email_valido(vendedor_email):
-            st.success("E-mail informado.")
-        else:
-            st.error("Informe um e-mail válido.")
+    _, login_col, _ = st.columns([1.2, 1.6, 1.2])
+    with login_col:
+        st.markdown("""
+        <div class="login-card">
+          <div class="login-kicker">Projeto Defensores do Contrato</div>
+          <div class="login-title">🏠 Simulador de Score de Vendas</div>
+          <div class="login-sub">Identifique-se para iniciar uma nova simulação.</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        email_login = st.text_input(
+            "E-mail do vendedor *",
+            placeholder="nome@empresa.com.br",
+            key="email_login_v10",
+        ).strip().lower()
+
+        entrar = st.button(
+            "ENTRAR NO SIMULADOR",
+            type="primary",
+            use_container_width=True,
+            key="entrar_simulador_v10",
+        )
+        if entrar:
+            if not email_valido(email_login):
+                st.error("Informe um e-mail válido para continuar.")
+            else:
+                st.session_state.vendedor_email_confirmado_v10 = email_login
+                st.session_state.usuario_identificado_v10 = True
+                st.rerun()
+    st.stop()
+
+vendedor_email = st.session_state.vendedor_email_confirmado_v10
+
+with st.sidebar:
+    st.markdown("### 👤 Usuário")
+    st.caption("Vendedor identificado")
+    st.write(f"**{vendedor_email}**")
+
+    if st.button("Trocar usuário", key="trocar_usuario_v10", use_container_width=True):
+        st.session_state.usuario_identificado_v10 = False
+        st.session_state.vendedor_email_confirmado_v10 = ""
+        st.session_state.admin_autenticado_v71 = False
+        st.session_state.pop("resultado", None)
+        st.rerun()
 
     st.divider()
     st.markdown("### 🔐 Administração")
@@ -75,13 +130,10 @@ with st.sidebar:
             type="password",
             key="senha_admin_v71",
         )
-        if st.button("Entrar como administrador", key="login_admin_v71"):
+        if st.button("Entrar como administrador", key="login_admin_v71", use_container_width=True):
             senha_correta = obter_senha_admin()
             if not senha_correta:
-                st.error(
-                    "A senha administrativa ainda não foi configurada "
-                    "nos Secrets do Streamlit."
-                )
+                st.error("A senha administrativa ainda não foi configurada nos Secrets.")
             elif senha_digitada == senha_correta:
                 st.session_state.admin_autenticado_v71 = True
                 st.rerun()
@@ -89,7 +141,7 @@ with st.sidebar:
                 st.error("Senha administrativa incorreta.")
     else:
         st.success("Perfil: ADMINISTRADOR")
-        if st.button("Sair da administração", key="logout_admin_v71"):
+        if st.button("Sair da administração", key="logout_admin_v71", use_container_width=True):
             st.session_state.admin_autenticado_v71 = False
             st.rerun()
 
@@ -189,6 +241,22 @@ st.markdown("""
   <div class="v9-subtitle">Avaliação estruturada do risco de distrato no momento da venda.</div>
 </div>
 """, unsafe_allow_html=True)
+
+nav1, nav2, nav3 = st.columns([1, 1, 4])
+with nav1:
+    st.button("▣  Simulador", type="primary", use_container_width=True, disabled=True)
+with nav2:
+    if st.session_state.admin_autenticado_v71:
+        st.button("▣  Histórico", use_container_width=True, disabled=True)
+    else:
+        st.button("🔒  Histórico", use_container_width=True, disabled=True)
+with nav3:
+    if st.session_state.admin_autenticado_v71:
+        st.caption("🔐 Área Administrativa ativa")
+    else:
+        st.caption("Simulação atual • vendedor identificado")
+st.divider()
+
 
 
 # ============================================================
@@ -867,45 +935,46 @@ def campo_moeda(label, chave, valor_inicial=0.0, ajuda=None):
 
 
 # ============================================================
-# 1. EMPREENDIMENTO
+# DADOS DA SIMULAÇÃO — LAYOUT EXECUTIVO V10
 # ============================================================
-st.subheader("🏗 Dados do Empreendimento")
-st.markdown('<div class="v9-section-note">Selecione o empreendimento e a unidade da proposta.</div>', unsafe_allow_html=True)
-
-if cadastro.empty:
-    st.error(
-        "Não consegui carregar a relação de empreendimentos e unidades. "
-        "Confirme se o arquivo Excel está no mesmo repositório do app.py "
-        "e contém Empreendimento, Unidade e Tipo_Produto."
-    )
-    if erro_cadastro:
-        with st.expander("Detalhes técnicos do cadastro"):
-            st.code(erro_cadastro)
-
-c1, c2, c3 = st.columns(3)
-
-empreendimentos = sorted(
-    cadastro["Empreendimento"].dropna().astype(str).str.strip()
-    .loc[lambda x: x.ne("")].unique().tolist()
+st.markdown("## 📋 Dados da Simulação")
+st.markdown(
+    '<div class="v9-section-note">Preencha as informações abaixo para calcular o score de risco da venda.</div>',
+    unsafe_allow_html=True,
 )
 
-with c1:
+bloco_emp, bloco_cliente, bloco_proposta, bloco_renda = st.columns(4, gap="large")
+
+# ------------------------- EMPREENDIMENTO -------------------------
+with bloco_emp:
+    st.markdown("### 🏢 Empreendimento")
+
+    if cadastro.empty:
+        st.error("Cadastro de empreendimentos não carregado.")
+        if erro_cadastro:
+            with st.expander("Detalhes técnicos"):
+                st.code(erro_cadastro)
+
+    empreendimentos = sorted(
+        cadastro["Empreendimento"].dropna().astype(str).str.strip()
+        .loc[lambda x: x.ne("")].unique().tolist()
+    )
+
     empreendimento = st.selectbox(
         "Empreendimento *",
         [""] + empreendimentos,
         index=0,
-        key="empreendimento_v73",
+        key="empreendimento_v10",
     )
 
-if empreendimento:
-    cad_emp = cadastro[
-        cadastro["Empreendimento"].astype(str).str.strip()
-        == str(empreendimento).strip()
-    ].copy()
-else:
-    cad_emp = cadastro.iloc[0:0].copy()
+    if empreendimento:
+        cad_emp = cadastro[
+            cadastro["Empreendimento"].astype(str).str.strip()
+            == str(empreendimento).strip()
+        ].copy()
+    else:
+        cad_emp = cadastro.iloc[0:0].copy()
 
-with c2:
     unidades = sorted(
         cad_emp["Unidade"].dropna().astype(str).str.strip()
         .loc[lambda x: x.ne("")].unique().tolist(),
@@ -916,225 +985,100 @@ with c2:
         [""] + unidades,
         index=0,
         disabled=not bool(empreendimento),
-        key="unidade_v73",
+        key="unidade_v10",
     )
 
-# Tipo de Produto é amarrado ao EMPREENDIMENTO no Excel.
-tipo_produto = ""
-if empreendimento and not cad_emp.empty and "Tipo_Produto" in cad_emp.columns:
-    serie_tipo = cad_emp["Tipo_Produto"].fillna("").astype(str).str.strip()
-    serie_tipo = serie_tipo[serie_tipo.ne("")]
-    if not serie_tipo.empty:
-        tipo_produto = serie_tipo.iloc[0]
+    tipo_produto = ""
+    if empreendimento and not cad_emp.empty and "Tipo_Produto" in cad_emp.columns:
+        serie_tipo = cad_emp["Tipo_Produto"].fillna("").astype(str).str.strip()
+        serie_tipo = serie_tipo[serie_tipo.ne("")]
+        if not serie_tipo.empty:
+            tipo_produto = serie_tipo.iloc[0]
 
-# Mantém o terceiro campo exatamente alinhado aos selectboxes.
-# O valor é automático e não pode ser alterado pelo vendedor.
-with c3:
     st.text_input(
         "Tipo de Produto",
         value=tipo_produto,
         disabled=True,
-        key=f"tipo_produto_v73_{empreendimento}",
+        key=f"tipo_produto_v10_{empreendimento}",
     )
 
-st.divider()
+# ------------------------- PROPONENTE -------------------------
+with bloco_cliente:
+    st.markdown("### 👤 Perfil do Cliente")
 
-
-# ============================================================
-# 2. PROPONENTE
-# ============================================================
-st.subheader("👤 Cliente Proponente")
-st.markdown('<div class="v9-section-note">Dados do titular da proposta e leitura do SPC.</div>', unsafe_allow_html=True)
-
-p1, p2 = st.columns(2)
-
-with p1:
     nascimento = st.date_input(
         "Data de Nascimento *",
         value=None,
         min_value=date(1930, 1, 1),
         max_value=datetime.now(TIMEZONE_BRASILIA).date(),
         format="DD/MM/YYYY",
+        key="nascimento_v10",
     )
-
     idade = calcular_idade(nascimento) if nascimento else None
     faixa_idade = faixa_etaria(idade) if idade is not None else None
-
     if idade is not None:
-        st.info(f"Idade: **{idade} anos** | Faixa: **{faixa_idade}**")
+        st.caption(f"{idade} anos • {faixa_idade}")
 
     estado_civil = st.selectbox(
         "Estado Civil *",
         ["", "SOLTEIRO(A)", "DIVORCIADO(A)", "CASADO(A)"],
         index=0,
+        key="estado_civil_v10",
     )
 
-with p2:
     pdf_prop = st.file_uploader(
-        "Anexar PDF do SPC — Proponente *",
+        "SPC do Proponente *",
         type=["pdf"],
-        key="pdf_prop",
+        key="pdf_prop_v10",
     )
 
     dados_spc_prop = None
     if pdf_prop:
         try:
-            with st.spinner("Lendo todas as páginas do SPC..."):
+            with st.spinner("Lendo SPC..."):
                 dados_spc_prop = extrair_dados_spc(pdf_prop)
-
             if dados_spc_prop["score_faixa"]:
                 st.success(
-                    f"RISCO DE CRÉDITO identificado: "
-                    f"**{dados_spc_prop['score_letra']}** → "
-                    f"**{dados_spc_prop['score_faixa']}**"
+                    f"Score: {dados_spc_prop['score_letra']} → "
+                    f"{dados_spc_prop['score_faixa']}"
                 )
             else:
-                st.warning("Não foi possível identificar o campo RISCO DE CRÉDITO.")
-
+                st.warning("Score não localizado no SPC.")
             if dados_spc_prop["renda_presumida"]:
-                st.success(
-                    "Renda Presumida - SPC Brasil: "
-                    f"**{brl(dados_spc_prop['renda_presumida'])}**"
-                )
+                st.success(f"Renda: {brl(dados_spc_prop['renda_presumida'])}")
             else:
-                st.warning("Não foi possível identificar a Renda Presumida - SPC Brasil.")
-
-            with st.expander("Conferência da leitura do SPC"):
-                st.write("Score literal:", dados_spc_prop["score_letra"] or "Não localizado")
-                st.write(
-                    "Taxa de inadimplência:",
-                    f"{dados_spc_prop['taxa_inadimplencia']:.2f}%"
-                    if dados_spc_prop["taxa_inadimplencia"] is not None else "Não localizada",
-                )
-                st.write("Consultas 30 dias:", dados_spc_prop["consultas_30d"])
-                st.write("Consultas 90 dias:", dados_spc_prop["consultas_90d"])
-                st.write(
-                    "Aviso de renda totalmente comprometida no SPC:",
-                    "Sim" if dados_spc_prop["renda_comprometida_spc"] else "Não",
-                )
+                st.warning("Renda Presumida não localizada.")
         except Exception as e:
-            st.error(f"Falha na leitura do PDF: {e}")
+            st.error(f"Falha na leitura do SPC: {e}")
 
-score_proponente = dados_spc_prop["score_faixa"] if dados_spc_prop else None
-renda_proponente = (
-    float(dados_spc_prop["renda_presumida"])
-    if dados_spc_prop and dados_spc_prop["renda_presumida"] else 0.0
-)
-
-# Fallback manual só aparece quando a leitura não encontrou o campo.
-if pdf_prop and not score_proponente:
-    score_proponente = st.selectbox(
-        "Score SPC — preenchimento manual",
-        ["", "A - B", "C - D", "E - F"],
-        index=0,
+    score_proponente = dados_spc_prop["score_faixa"] if dados_spc_prop else None
+    renda_proponente = (
+        float(dados_spc_prop["renda_presumida"])
+        if dados_spc_prop and dados_spc_prop["renda_presumida"] else 0.0
     )
 
-if pdf_prop and renda_proponente <= 0:
-    renda_proponente = campo_moeda(
-        "Renda Presumida — preenchimento manual (R$)",
-        "renda_proponente_manual_v8",
-    )
-
-st.divider()
-
-
-# ============================================================
-# 3. CLIENTES ADICIONAIS — máximo total de 5 clientes
-# REGRA OFICIAL V8.1 — CLIENTES ADICIONAIS:
-# - manter até 4 clientes adicionais (5 clientes no total);
-# - usar os adicionais SOMENTE para composição da renda;
-# - o score considerado no motor de risco é exclusivamente o do proponente;
-# - não coletar campos extras de "Condições Adicionais".
-
-# ============================================================
-st.subheader("👥 Composição de Renda")
-st.markdown('<div class="v9-section-note">Clientes adicionais participam somente da composição da renda.</div>', unsafe_allow_html=True)
-
-qtd_adicionais = st.number_input(
-    "Quantos clientes adicionais participarão da proposta?",
-    min_value=0,
-    max_value=4,
-    value=0,
-    step=1,
-)
-
-rendas_adicionais = []
-
-for i in range(int(qtd_adicionais)):
-    numero = i + 2
-    with st.expander(f"Cliente {numero}", expanded=True):
-        pdf_add = st.file_uploader(
-            f"Anexar PDF SPC — Cliente {numero}",
-            type=["pdf"],
-            key=f"pdf_cliente_{numero}",
+    if pdf_prop and not score_proponente:
+        score_proponente = st.selectbox(
+            "Score SPC — preenchimento manual",
+            ["", "A - B", "C - D", "E - F"],
+            key="score_prop_manual_v10",
         )
 
-        score_add = None
-        renda_add = 0.0
+    if pdf_prop and renda_proponente <= 0:
+        renda_proponente = campo_moeda(
+            "Renda Presumida — preenchimento manual (R$)",
+            "renda_prop_manual_v10",
+        )
 
-        if pdf_add:
-            try:
-                d_add = extrair_dados_spc(pdf_add)
-                score_add = d_add["score_faixa"]
-                renda_add = float(d_add["renda_presumida"] or 0)
+# ------------------------- PROPOSTA -------------------------
+with bloco_proposta:
+    st.markdown("### 📄 Dados da Proposta")
 
-                a, b = st.columns(2)
-                a.metric(
-                    "Score SPC",
-                    f"{d_add['score_letra']} → {score_add}" if score_add else "Não localizado",
-                )
-                b.metric("Renda Presumida", brl(renda_add) if renda_add else "Não localizada")
-            except Exception as e:
-                st.error(f"Falha na leitura do Cliente {numero}: {e}")
-
-        if pdf_add and not score_add:
-            score_add = st.selectbox(
-                f"Score manual — Cliente {numero}",
-                ["", "A - B", "C - D", "E - F"],
-                key=f"score_manual_{numero}",
-            )
-
-        if pdf_add and renda_add <= 0:
-            renda_add = campo_moeda(
-                f"Renda manual — Cliente {numero} (R$)",
-                f"renda_manual_{numero}_v8",
-            )
-
-        # O score do cliente adicional NÃO participa da pontuação da venda.
-        # Sua renda presumida participa da composição da renda.
-        rendas_adicionais.append(renda_add)
-
-# REGRA OFICIAL V7.1:
-# O score utilizado na análise é EXCLUSIVAMENTE o score do PROPONENTE.
-# Os clientes adicionais participam somente da composição da renda.
-score_analise = score_proponente
-renda_total = renda_proponente + sum(rendas_adicionais)
-
-m1, m2 = st.columns(2)
-m1.metric("Score usado na análise — Proponente", score_analise or "—")
-m2.metric("Renda total da proposta", brl(renda_total))
-st.divider()
-
-
-# ============================================================
-# 4. DADOS FINANCEIROS
-# ============================================================
-st.subheader("💰 Dados Financeiros")
-st.markdown('<div class="v9-section-note">Condições financeiras consideradas no score da venda.</div>', unsafe_allow_html=True)
-
-f1, f2 = st.columns(2)
-
-with f1:
-    ato_urba = campo_moeda(
-        "Ato Urba (R$) *",
-        "ato_urba_v8",
-    )
+    ato_urba = campo_moeda("Ato Urba (R$) *", "ato_urba_v10")
     valor_proposta = campo_moeda(
         "Valor da Proposta / Líquido CV (R$) *",
-        "valor_proposta_v8",
+        "valor_proposta_v10",
     )
-
-with f2:
     plano = st.selectbox(
         "Plano *",
         [
@@ -1144,12 +1088,60 @@ with f2:
             "MÉDIO LONGO (71 A 144X)",
             "LONGO PRAZO (145 A 180X)",
         ],
-        index=0,
+        key="plano_v10",
     )
     primeira_mensal = campo_moeda(
         "Valor da 1ª Mensal (R$) *",
-        "primeira_mensal_v8",
+        "primeira_mensal_v10",
     )
+
+# ------------------------- COMPOSIÇÃO DE RENDA -------------------------
+with bloco_renda:
+    st.markdown("### 👥 Composição de Renda")
+    st.caption("Adicionais compõem somente a renda. O score da venda é do proponente.")
+
+    qtd_adicionais = st.number_input(
+        "Clientes adicionais",
+        min_value=0,
+        max_value=4,
+        value=0,
+        step=1,
+        key="qtd_adicionais_v10",
+    )
+
+    rendas_adicionais = []
+    for i in range(int(qtd_adicionais)):
+        numero = i + 2
+        with st.expander(f"Cliente {numero}", expanded=True):
+            pdf_add = st.file_uploader(
+                f"SPC — Cliente {numero}",
+                type=["pdf"],
+                key=f"pdf_cliente_v10_{numero}",
+            )
+            renda_add = 0.0
+
+            if pdf_add:
+                try:
+                    d_add = extrair_dados_spc(pdf_add)
+                    renda_add = float(d_add["renda_presumida"] or 0)
+                    if renda_add:
+                        st.success(f"Renda: {brl(renda_add)}")
+                    else:
+                        st.warning("Renda não localizada.")
+                except Exception as e:
+                    st.error(f"Falha na leitura: {e}")
+
+            if pdf_add and renda_add <= 0:
+                renda_add = campo_moeda(
+                    f"Renda manual — Cliente {numero} (R$)",
+                    f"renda_manual_v10_{numero}",
+                )
+
+            rendas_adicionais.append(renda_add)
+
+# REGRA OFICIAL: score exclusivamente do proponente.
+score_analise = score_proponente
+renda_total = renda_proponente + sum(rendas_adicionais)
 
 perc_ato = ato_urba / valor_proposta * 100 if valor_proposta > 0 else 0
 perc_comp = primeira_mensal / renda_total * 100 if renda_total > 0 else 0
@@ -1159,52 +1151,41 @@ faixa_comp = faixa_comprometimento(perc_comp)
 faixa_rd = faixa_renda(renda_total)
 
 st.divider()
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("% do Ato", f"{perc_ato:.2f}%", faixa_at)
-k2.metric("Comprometimento", f"{perc_comp:.2f}%", faixa_comp)
-k3.metric("Renda Total", brl(renda_total), ABREV_RENDA[faixa_rd])
-k4.metric("Faixa Etária", faixa_idade or "—")
 
+# Indicadores instantâneos abaixo do formulário.
+i1, i2, i3, i4 = st.columns(4)
+i1.metric("% do Ato", f"{perc_ato:.2f}%", faixa_at)
+i2.metric("Comprometimento", f"{perc_comp:.2f}%", faixa_comp)
+i3.metric("Renda Total", brl(renda_total), ABREV_RENDA[faixa_rd])
+i4.metric("Faixa Etária", faixa_idade or "—")
 
-# ============================================================
-# 5. VALIDAÇÃO E CÁLCULO
-# ============================================================
 faltando = []
-
-if not empreendimento:
-    faltando.append("Empreendimento")
-if not unidade:
-    faltando.append("Unidade")
-if not tipo_produto:
-    faltando.append("Tipo de Produto")
-if not nascimento:
-    faltando.append("Data de Nascimento")
-if not estado_civil:
-    faltando.append("Estado Civil")
-if not pdf_prop:
-    faltando.append("PDF SPC do Proponente")
-if not score_analise:
-    faltando.append("Score SPC do Proponente")
-if renda_total <= 0:
-    faltando.append("Renda Presumida")
-if valor_proposta <= 0:
-    faltando.append("Valor da Proposta")
-if not plano:
-    faltando.append("Plano")
-if primeira_mensal <= 0:
-    faltando.append("1ª Mensal")
-
-st.divider()
+if not empreendimento: faltando.append("Empreendimento")
+if not unidade: faltando.append("Unidade")
+if not tipo_produto: faltando.append("Tipo de Produto")
+if not nascimento: faltando.append("Data de Nascimento")
+if not estado_civil: faltando.append("Estado Civil")
+if not pdf_prop: faltando.append("SPC do Proponente")
+if not score_analise: faltando.append("Score SPC do Proponente")
+if renda_total <= 0: faltando.append("Renda Presumida")
+if valor_proposta <= 0: faltando.append("Valor da Proposta")
+if not plano: faltando.append("Plano")
+if primeira_mensal <= 0: faltando.append("1ª Mensal")
 
 if faltando:
     st.warning("Preencha/valide: **" + ", ".join(faltando) + "**")
 
-if st.button(
-    "🎯 CALCULAR SCORE DA VENDA",
-    type="primary",
-    use_container_width=True,
-    disabled=bool(faltando),
-):
+_, botao_calc = st.columns([3, 1])
+with botao_calc:
+    calcular = st.button(
+        "📊 CALCULAR SIMULAÇÃO",
+        type="primary",
+        use_container_width=True,
+        disabled=bool(faltando),
+        key="calcular_v10",
+    )
+
+if calcular:
     notas = {
         "score_credito": NOTAS_SCORE[score_analise],
         "ato": NOTAS_ATO[faixa_at],
@@ -1215,7 +1196,6 @@ if st.button(
         "idade": NOTAS_IDADE[faixa_idade],
         "estado_civil": NOTAS_ESTADO_CIVIL[estado_civil],
     }
-
     score_final = calcular_score_total(notas)
     classificacao, cor = classificar(score_final)
 
@@ -1246,9 +1226,8 @@ if st.button(
         "faixa_rd": faixa_rd,
     }
 
-
 # ============================================================
-# 6. RESULTADO E ESTRATÉGIA — V8
+# RESULTADO E ESTRATÉGIA — V10
 # ============================================================
 if st.session_state.resultado:
     d = st.session_state.resultado
@@ -1568,7 +1547,7 @@ else:
 # ============================================================
 st.divider()
 st.caption(
-    "V9.0 — Projeto Defensores do Contrato | "
+    "V10.0 — Projeto Defensores do Contrato | "
     "Score SPC exclusivamente do proponente | Histórico administrativo do piloto"
 )
 
