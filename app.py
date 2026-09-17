@@ -1126,7 +1126,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
     # ------------------------- PROPONENTE -------------------------
     with bloco_cliente:
         st.markdown("### 👤 Perfil do Cliente")
-        st.caption("Anexe o relatório do SPC do cliene proponente.")
+        st.caption("Anexe o relatório do SPC do cliente proponente.")
 
         pdf_prop = st.file_uploader(
             "SPC do Proponente *",
