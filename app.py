@@ -85,15 +85,15 @@ def obter_senha_admin():
         return ""
 
 
-if "usuario_identificado_v10" not in st.session_state:
-    st.session_state.usuario_identificado_v10 = False
-if "vendedor_email_confirmado_v10" not in st.session_state:
-    st.session_state.vendedor_email_confirmado_v10 = ""
+if "usuario_identificado_v14" not in st.session_state:
+    st.session_state.usuario_identificado_v14 = False
+if "vendedor_email_confirmado_v14" not in st.session_state:
+    st.session_state.vendedor_email_confirmado_v14 = ""
 if "admin_autenticado_v11" not in st.session_state:
     st.session_state.admin_autenticado_v11 = False
 
 # A aplicação SEMPRE inicia pela identificação do vendedor.
-if not st.session_state.usuario_identificado_v10:
+if not st.session_state.usuario_identificado_v14:
     st.markdown("""
     <style>
     .login-card {
@@ -125,14 +125,14 @@ if not st.session_state.usuario_identificado_v10:
         email_login = st.text_input(
             "E-mail do vendedor *",
             placeholder="nome@empresa.com.br",
-            key="email_login_v10",
+            key="email_login_v14",
         ).strip().lower()
 
         entrar = st.button(
             "ENTRAR NO SIMULADOR",
             type="primary",
             use_container_width=True,
-            key="entrar_simulador_v10",
+            key="entrar_simulador_v14",
         )
         if entrar:
             if not email_valido(email_login):
@@ -146,23 +146,23 @@ if not st.session_state.usuario_identificado_v10:
                     if perfil is None:
                         st.error("E-mail não autorizado. Solicite o cadastro ao responsável pelo simulador.")
                     else:
-                        st.session_state.vendedor_email_confirmado_v10 = email_login
-                        st.session_state.usuario_identificado_v10 = True
+                        st.session_state.vendedor_email_confirmado_v14 = email_login
+                        st.session_state.usuario_identificado_v14 = True
                         st.session_state.perfil_email_v13 = perfil
                         st.session_state.admin_autenticado_v11 = False
                         st.rerun()
     st.stop()
 
-vendedor_email = st.session_state.vendedor_email_confirmado_v10
+vendedor_email = st.session_state.vendedor_email_confirmado_v14
 
 with st.sidebar:
     st.markdown("### 👤 Usuário")
     st.caption("Vendedor identificado")
     st.write(f"**{vendedor_email}**")
 
-    if st.button("Trocar usuário", key="trocar_usuario_v10", use_container_width=True):
-        st.session_state.usuario_identificado_v10 = False
-        st.session_state.vendedor_email_confirmado_v10 = ""
+    if st.button("Trocar usuário", key="trocar_usuario_v14", use_container_width=True):
+        st.session_state.usuario_identificado_v14 = False
+        st.session_state.vendedor_email_confirmado_v14 = ""
         st.session_state.pop("perfil_email_v13", None)
         st.session_state.admin_autenticado_v11 = False
         st.session_state.pop("resultado", None)
@@ -1039,7 +1039,7 @@ def campo_moeda(label, chave, valor_inicial=0.0, ajuda=None):
 
 if st.session_state.get("pagina_v11") == "Simulador":
     # ============================================================
-    # DADOS DA SIMULAÇÃO — LAYOUT EXECUTIVO V10
+    # DADOS DA SIMULAÇÃO — LAYOUT EXECUTIVO V14
     # ============================================================
     st.markdown("## 📋 Dados da Simulação")
     st.markdown(
@@ -1068,7 +1068,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
             "Empreendimento *",
             [""] + empreendimentos,
             index=0,
-            key="empreendimento_v10",
+            key="empreendimento_v14",
         )
 
         if empreendimento:
@@ -1120,7 +1120,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
             "Tipo de Produto",
             value=tipo_produto,
             disabled=True,
-            key=f"tipo_produto_v10_{empreendimento}",
+            key=f"tipo_produto_v14_{empreendimento}",
         )
 
     # ------------------------- PROPONENTE -------------------------
@@ -1201,10 +1201,10 @@ if st.session_state.get("pagina_v11") == "Simulador":
     with bloco_proposta:
         st.markdown("### 📄 Dados da Proposta")
 
-        ato_urba = campo_moeda("Ato Urba (R$) *", "ato_urba_v10")
+        ato_urba = campo_moeda("Ato Urba (R$) *", "ato_urba_v14")
         valor_proposta = campo_moeda(
             "Valor da Proposta / Líquido CV (R$) *",
-            "valor_proposta_v10",
+            "valor_proposta_v14",
         )
         plano = st.selectbox(
             "Plano *",
@@ -1215,11 +1215,11 @@ if st.session_state.get("pagina_v11") == "Simulador":
                 "MÉDIO LONGO (71 A 144X)",
                 "LONGO PRAZO (145 A 180X)",
             ],
-            key="plano_v10",
+            key="plano_v14",
         )
         primeira_mensal = campo_moeda(
             "Valor da 1ª Mensal (R$) *",
-            "primeira_mensal_v10",
+            "primeira_mensal_v14",
         )
 
     # ------------------------- COMPOSIÇÃO DE RENDA -------------------------
@@ -1233,7 +1233,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
             max_value=4,
             value=0,
             step=1,
-            key="qtd_adicionais_v10",
+            key="qtd_adicionais_v14",
         )
 
         rendas_adicionais = []
@@ -1243,7 +1243,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
                 pdf_add = st.file_uploader(
                     f"SPC — Cliente {numero}",
                     type=["pdf"],
-                    key=f"pdf_cliente_v10_{numero}",
+                    key=f"pdf_cliente_v14_{numero}",
                 )
                 renda_add = 0.0
 
@@ -1261,7 +1261,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
                 if pdf_add and renda_add <= 0:
                     renda_add = campo_moeda(
                         f"Renda manual — Cliente {numero} (R$)",
-                        f"renda_manual_v10_{numero}",
+                        f"renda_manual_v14_{numero}",
                     )
 
                 rendas_adicionais.append(renda_add)
@@ -1309,7 +1309,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
             type="primary",
             use_container_width=True,
             disabled=bool(faltando),
-            key="calcular_v10",
+            key="calcular_v14",
         )
 
     if calcular:
@@ -1354,7 +1354,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
         }
 
     # ============================================================
-    # RESULTADO E ESTRATÉGIA — V10
+    # RESULTADO E ESTRATÉGIA — V14
     # ============================================================
     if st.session_state.resultado:
         d = st.session_state.resultado
