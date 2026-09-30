@@ -441,7 +441,7 @@ SCORE_MAX = sum([
     3 * PESOS["estado_civil"],
 ])
 
-LIMITE_BAIXO     = 58
+LIMITE_BAIXO     = 54
 LIMITE_MODERADO  = 33
 
 
