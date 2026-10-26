@@ -1,8 +1,7 @@
-# app.py — V16.3
-# Simulador de Score de Vendas — Urba
-# V16.3: Identidade visual Urba (#079D56 / #FF8C23), fundo branco,
-#         logo SVG no lugar de emojis, sem tira preta, inputs legíveis,
-#         botões destrutivos em verde escuro, textos em cinza escuro.
+# app.py — V16.4
+# Simulador de Score de Vendas — Projeto Defensores do Contrato
+# V16.4: Design Urba profissional, fundo branco, sem HTML problemático,
+#        autenticação via Neon PostgreSQL, histórico no banco.
 
 import io
 import os
@@ -11,254 +10,215 @@ import unicodedata
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+import bcrypt
 import pandas as pd
 import psycopg2
-import bcrypt
-import streamlit as st
+import psycopg2.extras
 import pdfplumber
+import streamlit as st
 
+# ============================================================
+# CONFIG DA PÁGINA — DEVE SER O PRIMEIRO COMANDO
+# ============================================================
 st.set_page_config(
-    page_title="Simulador de Score — Urba",
+    page_title="Urba · Simulador de Score",
     page_icon="https://i.imgur.com/placeholder.png",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 # ============================================================
-# PALETA URBA
+# CSS GLOBAL — DESIGN URBA V16.4
 # ============================================================
-VERDE       = "#079D56"
-VERDE_ESC   = "#056B3A"
-VERDE_CLARO = "#E8F7EF"
-LARANJA     = "#FF8C23"
-LARANJA_CL  = "#FFF3E8"
-CINZA_ESC   = "#2D2D2D"
-CINZA_MED   = "#5A5A5A"
-CINZA_CL    = "#F4F6F8"
-CINZA_BORDA = "#E0E4EA"
-BRANCO      = "#FFFFFF"
+URBA_GREEN      = "#079D56"
+URBA_GREEN_DARK = "#056B3A"
+URBA_ORANGE     = "#FF8C23"
+URBA_TEXT       = "#2D2D2D"
+URBA_MUTED      = "#6B7280"
+URBA_BG         = "#FFFFFF"
+URBA_CARD       = "#F4F6F8"
+URBA_BORDER     = "#E2E8F0"
 
-# Logo SVG inline (ícone das duas casinhas Urba)
-LOGO_SVG = """
-<svg width="38" height="38" viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="2" y="28" width="62" height="68" rx="10" fill="none" stroke="#079D56" stroke-width="7"/>
-  <polygon points="33,2 2,32 64,32" fill="none" stroke="#079D56" stroke-width="7" stroke-linejoin="round"/>
-  <rect x="38" y="38" width="58" height="58" rx="10" fill="#FF8C23"/>
-  <polygon points="67,14 38,44 96,44" fill="#FF8C23"/>
-</svg>
-"""
-
-LOGO_SVG_BRANCO = """
-<svg width="38" height="38" viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="2" y="28" width="62" height="68" rx="10" fill="none" stroke="#FFFFFF" stroke-width="7"/>
-  <polygon points="33,2 2,32 64,32" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linejoin="round"/>
-  <rect x="38" y="38" width="58" height="58" rx="10" fill="#FF8C23"/>
-  <polygon points="67,14 38,44 96,44" fill="#FF8C23"/>
-</svg>
-"""
-
-# ============================================================
-# CSS GLOBAL — V16.3
-# ============================================================
 st.markdown(f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
 /* ── Reset geral ── */
-html, body, [class*="css"] {{
-    font-family: 'Inter', sans-serif !important;
-    color: {CINZA_ESC};
+html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {{
+    background-color: {URBA_BG} !important;
+    color: {URBA_TEXT} !important;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif !important;
 }}
 
 /* ── Remove tira preta do topo ── */
-#MainMenu, header, footer {{ visibility: hidden; height: 0; }}
+#MainMenu, header[data-testid="stHeader"], footer {{
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+}}
 [data-testid="stToolbar"] {{ display: none !important; }}
 .stDeployButton {{ display: none !important; }}
 
-/* ── Fundo branco ── */
-[data-testid="stAppViewContainer"],
-[data-testid="stMain"],
-.main .block-container {{
-    background-color: {BRANCO} !important;
-}}
-.block-container {{
-    max-width: 1380px;
-    padding-top: 1.5rem;
-    padding-bottom: 3rem;
-}}
-
-/* ── Sidebar verde Urba ── */
+/* ── Sidebar ── */
 [data-testid="stSidebar"] {{
-    background: linear-gradient(180deg, {VERDE_ESC} 0%, {VERDE} 100%) !important;
+    background: linear-gradient(180deg, {URBA_GREEN_DARK} 0%, {URBA_GREEN} 100%) !important;
     border-right: none !important;
 }}
 [data-testid="stSidebar"] * {{
-    color: {BRANCO} !important;
+    color: #FFFFFF !important;
 }}
 [data-testid="stSidebar"] .stButton > button {{
     background: rgba(255,255,255,0.15) !important;
-    color: {BRANCO} !important;
-    border: 1px solid rgba(255,255,255,0.35) !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
-    transition: background 0.2s;
-}}
-[data-testid="stSidebar"] .stButton > button:hover {{
-    background: rgba(255,255,255,0.28) !important;
-}}
-[data-testid="stSidebar"] hr {{
-    border-color: rgba(255,255,255,0.25) !important;
-}}
-[data-testid="stSidebar"] input {{
-    background: rgba(255,255,255,0.12) !important;
-    color: {BRANCO} !important;
+    color: #FFFFFF !important;
     border: 1px solid rgba(255,255,255,0.3) !important;
     border-radius: 8px !important;
+    font-weight: 600 !important;
+    transition: background 0.2s !important;
 }}
-[data-testid="stSidebar"] input::placeholder {{
-    color: rgba(255,255,255,0.55) !important;
+[data-testid="stSidebar"] .stButton > button:hover {{
+    background: rgba(255,255,255,0.25) !important;
+}}
+[data-testid="stSidebar"] hr {{
+    border-color: rgba(255,255,255,0.2) !important;
 }}
 
-/* ── Inputs e selects ── */
-[data-baseweb="input"] > div,
-[data-baseweb="select"] > div,
-[data-baseweb="textarea"] > div {{
-    background-color: {BRANCO} !important;
-    border: 1.5px solid {CINZA_BORDA} !important;
-    border-radius: 8px !important;
-    color: {CINZA_ESC} !important;
-}}
+/* ── Inputs e selects — fundo branco, texto escuro ── */
 [data-baseweb="input"] input,
-[data-baseweb="select"] input,
 [data-baseweb="textarea"] textarea {{
-    color: {CINZA_ESC} !important;
-    background: {BRANCO} !important;
+    background-color: #FFFFFF !important;
+    color: {URBA_TEXT} !important;
+    border-color: {URBA_BORDER} !important;
+    border-radius: 8px !important;
 }}
-[data-baseweb="input"] > div:focus-within,
-[data-baseweb="select"] > div:focus-within {{
-    border-color: {VERDE} !important;
-    box-shadow: 0 0 0 3px rgba(7,157,86,0.12) !important;
+[data-baseweb="input"] > div,
+[data-baseweb="textarea"] > div {{
+    background-color: #FFFFFF !important;
+    border-color: {URBA_BORDER} !important;
+    border-radius: 8px !important;
+}}
+[data-baseweb="input"] input:focus,
+[data-baseweb="textarea"] textarea:focus {{
+    border-color: {URBA_GREEN} !important;
+    box-shadow: 0 0 0 2px rgba(7,157,86,0.15) !important;
+}}
+
+/* ── Select / Dropdown ── */
+[data-baseweb="select"] > div {{
+    background-color: #FFFFFF !important;
+    border-color: {URBA_BORDER} !important;
+    border-radius: 8px !important;
+    color: {URBA_TEXT} !important;
 }}
 [data-baseweb="select"] span {{
-    color: {CINZA_ESC} !important;
+    color: {URBA_TEXT} !important;
 }}
-/* Placeholder dos selects */
-[data-baseweb="select"] [data-testid="stSelectboxLabel"] {{
-    color: {CINZA_MED} !important;
+[data-baseweb="popover"] li {{
+    color: {URBA_TEXT} !important;
+    background: #FFFFFF !important;
 }}
-
-/* ── Labels dos campos ── */
-label, .stTextInput label, .stSelectbox label,
-.stNumberInput label, .stFileUploader label {{
-    color: {CINZA_ESC} !important;
-    font-weight: 600 !important;
-    font-size: 0.82rem !important;
-    letter-spacing: 0.04em !important;
-    text-transform: uppercase !important;
+[data-baseweb="popover"] li:hover {{
+    background: #F0FBF5 !important;
 }}
 
-/* ── Botão primário (verde Urba) ── */
-.stButton > button[kind="primary"],
-button[data-testid="baseButton-primary"] {{
-    background: {VERDE} !important;
-    color: {BRANCO} !important;
+/* ── Number input ── */
+[data-testid="stNumberInput"] input {{
+    background-color: #FFFFFF !important;
+    color: {URBA_TEXT} !important;
+    border-color: {URBA_BORDER} !important;
+    border-radius: 8px !important;
+}}
+[data-testid="stNumberInput"] > div {{
+    background-color: #FFFFFF !important;
+    border-color: {URBA_BORDER} !important;
+    border-radius: 8px !important;
+}}
+[data-testid="stNumberInput"] button {{
+    background-color: {URBA_CARD} !important;
+    color: {URBA_TEXT} !important;
+    border-color: {URBA_BORDER} !important;
+}}
+
+/* ── File uploader ── */
+[data-testid="stFileUploader"] {{
+    background-color: #F0FBF5 !important;
+    border: 2px dashed {URBA_GREEN} !important;
+    border-radius: 10px !important;
+    padding: 8px !important;
+}}
+[data-testid="stFileUploader"] * {{
+    color: {URBA_TEXT} !important;
+}}
+[data-testid="stFileUploader"] button {{
+    background-color: {URBA_GREEN} !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 6px !important;
+}}
+
+/* ── Botões primários ── */
+.stButton > button[kind="primary"] {{
+    background-color: {URBA_GREEN} !important;
+    color: #FFFFFF !important;
     border: none !important;
     border-radius: 8px !important;
     font-weight: 700 !important;
     font-size: 0.9rem !important;
-    letter-spacing: 0.04em !important;
-    min-height: 44px !important;
+    padding: 10px 20px !important;
     transition: background 0.2s, transform 0.1s !important;
-    box-shadow: 0 2px 8px rgba(7,157,86,0.18) !important;
 }}
 .stButton > button[kind="primary"]:hover {{
-    background: {VERDE_ESC} !important;
+    background-color: {URBA_GREEN_DARK} !important;
     transform: translateY(-1px) !important;
 }}
 
-/* ── Botão secundário ── */
-.stButton > button[kind="secondary"],
-button[data-testid="baseButton-secondary"] {{
-    background: {BRANCO} !important;
-    color: {VERDE} !important;
-    border: 1.5px solid {VERDE} !important;
+/* ── Botões secundários ── */
+.stButton > button[kind="secondary"] {{
+    background-color: #FFFFFF !important;
+    color: {URBA_GREEN} !important;
+    border: 2px solid {URBA_GREEN} !important;
     border-radius: 8px !important;
     font-weight: 600 !important;
-    min-height: 44px !important;
     transition: all 0.2s !important;
 }}
 .stButton > button[kind="secondary"]:hover {{
-    background: {VERDE_CLARO} !important;
+    background-color: #F0FBF5 !important;
 }}
 
-/* ── Botão desabilitado ── */
-.stButton > button:disabled {{
-    background: {CINZA_CL} !important;
-    color: #AAAAAA !important;
-    border: 1.5px solid {CINZA_BORDA} !important;
-    cursor: not-allowed !important;
-}}
-
-/* ── Download button (laranja) ── */
+/* ── Download button ── */
 .stDownloadButton > button {{
-    background: {LARANJA} !important;
-    color: {BRANCO} !important;
+    background-color: {URBA_ORANGE} !important;
+    color: #FFFFFF !important;
     border: none !important;
     border-radius: 8px !important;
     font-weight: 700 !important;
-    min-height: 44px !important;
-    box-shadow: 0 2px 8px rgba(255,140,35,0.18) !important;
-    transition: background 0.2s !important;
 }}
 .stDownloadButton > button:hover {{
-    background: #E07010 !important;
+    background-color: #E07A1A !important;
 }}
 
 /* ── Métricas ── */
-div[data-testid="stMetric"] {{
-    background: {CINZA_CL} !important;
-    border: 1.5px solid {CINZA_BORDA} !important;
+[data-testid="stMetric"] {{
+    background-color: {URBA_CARD} !important;
+    border: 1px solid {URBA_BORDER} !important;
     border-radius: 12px !important;
-    padding: 16px 18px !important;
-    min-height: 90px !important;
+    padding: 16px !important;
 }}
-div[data-testid="stMetricLabel"] p {{
-    color: {CINZA_MED} !important;
+[data-testid="stMetricLabel"] p {{
+    color: {URBA_MUTED} !important;
     font-size: 0.78rem !important;
     font-weight: 600 !important;
     text-transform: uppercase !important;
     letter-spacing: 0.05em !important;
 }}
-div[data-testid="stMetricValue"] {{
-    color: {CINZA_ESC} !important;
-    font-size: clamp(1.1rem, 1.6vw, 1.5rem) !important;
+[data-testid="stMetricValue"] {{
+    color: {URBA_TEXT} !important;
+    font-size: 1.5rem !important;
     font-weight: 700 !important;
 }}
-div[data-testid="stMetricDelta"] {{
-    font-size: 0.78rem !important;
+[data-testid="stMetricDelta"] {{
+    font-size: 0.8rem !important;
     font-weight: 600 !important;
 }}
 
-/* ── Cards / containers ── */
-[data-testid="stVerticalBlockBorderWrapper"] {{
-    background: {CINZA_CL} !important;
-    border: 1.5px solid {CINZA_BORDA} !important;
-    border-radius: 12px !important;
-}}
-[data-testid="stVerticalBlockBorderWrapper"] p,
-[data-testid="stVerticalBlockBorderWrapper"] strong,
-[data-testid="stVerticalBlockBorderWrapper"] span {{
-    color: {CINZA_ESC} !important;
-    white-space: normal !important;
-    overflow-wrap: anywhere !important;
-}}
-
-/* ── Captions ── */
-.stCaption, [data-testid="stCaptionContainer"] p {{
-    color: {CINZA_MED} !important;
-    font-size: 0.8rem !important;
-}}
-
-/* ── Alertas ── */
+/* ── Alertas / Warnings / Errors ── */
 [data-testid="stAlert"] {{
     border-radius: 10px !important;
     border-left-width: 4px !important;
@@ -266,448 +226,344 @@ div[data-testid="stMetricDelta"] {{
 
 /* ── Dataframe ── */
 [data-testid="stDataFrame"] {{
-    border: 1.5px solid {CINZA_BORDA} !important;
+    border: 1px solid {URBA_BORDER} !important;
     border-radius: 10px !important;
     overflow: hidden !important;
 }}
 
 /* ── Expander ── */
 [data-testid="stExpander"] {{
-    border: 1.5px solid {CINZA_BORDA} !important;
+    border: 1px solid {URBA_BORDER} !important;
     border-radius: 10px !important;
-    background: {CINZA_CL} !important;
-}}
-[data-testid="stExpander"] summary {{
-    color: {CINZA_ESC} !important;
-    font-weight: 600 !important;
+    background: {URBA_CARD} !important;
 }}
 
 /* ── Divider ── */
 hr {{
-    border-color: {CINZA_BORDA} !important;
-    margin: 1.2rem 0 !important;
+    border-color: {URBA_BORDER} !important;
+    margin: 1.5rem 0 !important;
 }}
 
-/* ── File uploader ── */
-[data-testid="stFileUploader"] {{
-    background: {CINZA_CL} !important;
-    border: 1.5px dashed {CINZA_BORDA} !important;
-    border-radius: 10px !important;
-    padding: 8px !important;
-}}
-[data-testid="stFileUploader"] * {{
-    color: {CINZA_ESC} !important;
+/* ── Labels dos inputs ── */
+label, .stTextInput label, .stSelectbox label,
+.stFileUploader label, .stNumberInput label {{
+    color: {URBA_TEXT} !important;
+    font-weight: 600 !important;
+    font-size: 0.82rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
 }}
 
-/* ── Number input ── */
-[data-testid="stNumberInput"] input {{
-    background: {BRANCO} !important;
-    color: {CINZA_ESC} !important;
-    border: 1.5px solid {CINZA_BORDA} !important;
-    border-radius: 8px !important;
-}}
-[data-testid="stNumberInput"] button {{
-    background: {CINZA_CL} !important;
-    color: {CINZA_ESC} !important;
-    border: 1px solid {CINZA_BORDA} !important;
+/* ── Caption / help text ── */
+.stCaption, [data-testid="stCaptionContainer"] p,
+small, .stMarkdown small {{
+    color: {URBA_MUTED} !important;
 }}
 
 /* ── Checkbox ── */
 [data-testid="stCheckbox"] label span {{
-    color: {CINZA_ESC} !important;
-    font-weight: 500 !important;
-    text-transform: none !important;
-    letter-spacing: 0 !important;
-    font-size: 0.9rem !important;
+    color: {URBA_TEXT} !important;
 }}
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar {{ width: 6px; height: 6px; }}
-::-webkit-scrollbar-track {{ background: {CINZA_CL}; }}
-::-webkit-scrollbar-thumb {{ background: #C0C8D0; border-radius: 3px; }}
-::-webkit-scrollbar-thumb:hover {{ background: {VERDE}; }}
+/* ── Container com borda ── */
+[data-testid="stVerticalBlockBorderWrapper"] {{
+    border: 1px solid {URBA_BORDER} !important;
+    border-radius: 12px !important;
+    background: {URBA_CARD} !important;
+    padding: 4px !important;
+}}
+
+/* ── Block container ── */
+.block-container {{
+    max-width: 1400px !important;
+    padding-top: 2rem !important;
+    padding-bottom: 3rem !important;
+}}
+
+/* ── Spinner ── */
+[data-testid="stSpinner"] {{
+    color: {URBA_GREEN} !important;
+}}
 </style>
 """, unsafe_allow_html=True)
 
+# ============================================================
+# BANCO DE DADOS — NEON POSTGRESQL
+# ============================================================
+TIMEZONE_BRASILIA = ZoneInfo("America/Sao_Paulo")
 
-# ============================================================
-# BANCO DE DADOS — NEON
-# ============================================================
+
+@st.cache_resource
+def get_connection():
+    return psycopg2.connect(
+        st.secrets["NEON_DATABASE_URL"],
+        cursor_factory=psycopg2.extras.RealDictCursor,
+    )
+
+
 def get_conn():
-    url = st.secrets["NEON_DATABASE_URL"]
-    return psycopg2.connect(url)
-
-
-def init_db():
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS usuarios (
-                    id            SERIAL PRIMARY KEY,
-                    email         TEXT UNIQUE NOT NULL,
-                    nome          TEXT NOT NULL,
-                    senha_hash    TEXT NOT NULL,
-                    perfil        TEXT NOT NULL CHECK (perfil IN ('VENDEDOR','ADMINISTRADOR')),
-                    ativo         BOOLEAN DEFAULT TRUE,
-                    criado_em     TIMESTAMPTZ DEFAULT NOW(),
-                    atualizado_em TIMESTAMPTZ DEFAULT NOW()
-                );
-                CREATE TABLE IF NOT EXISTS historico_simulacoes (
-                    id                         SERIAL PRIMARY KEY,
-                    data_hora                  TIMESTAMPTZ DEFAULT NOW(),
-                    vendedor_email             TEXT,
-                    empreendimento             TEXT,
-                    unidade                    TEXT,
-                    cpf_proponente             TEXT,
-                    idade                      INT,
-                    faixa_etaria               TEXT,
-                    estado_civil               TEXT,
-                    score_proponente           TEXT,
-                    renda_proponente           NUMERIC,
-                    qtd_clientes_adicionais    INT,
-                    renda_clientes_adicionais  NUMERIC,
-                    renda_total                NUMERIC,
-                    ato_urba                   NUMERIC,
-                    percentual_ato             NUMERIC,
-                    faixa_ato                  TEXT,
-                    valor_proposta             NUMERIC,
-                    primeira_mensal            NUMERIC,
-                    percentual_comprometimento NUMERIC,
-                    faixa_comprometimento      TEXT,
-                    score_final                INT,
-                    classificacao              TEXT
-                );
-            """)
-            conn.commit()
-
-
-try:
-    init_db()
-except Exception as e:
-    st.error(f"Erro ao conectar ao banco: {e}")
-    st.stop()
-
-
-def autenticar_usuario(email, senha):
     try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT nome, senha_hash, perfil, ativo FROM usuarios WHERE email = %s",
-                    (email.lower().strip(),)
-                )
-                row = cur.fetchone()
-                if not row:
-                    return None
-                nome, senha_hash, perfil, ativo = row
-                if not ativo:
-                    return None
-                if bcrypt.checkpw(senha.encode(), senha_hash.encode()):
-                    return {"nome": nome, "email": email.lower().strip(), "perfil": perfil}
-                return None
+        conn = get_connection()
+        conn.isolation_level  # testa se está viva
+        return conn
     except Exception:
+        get_connection.clear()
+        return get_connection()
+
+
+def db_query(sql, params=None, fetch=True):
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute(sql, params or ())
+        if fetch:
+            return cur.fetchall()
+        conn.commit()
         return None
 
 
-def listar_usuarios():
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, nome, email, perfil, ativo, criado_em FROM usuarios ORDER BY criado_em DESC")
-            cols = ["id", "nome", "email", "perfil", "ativo", "criado_em"]
-            return [dict(zip(cols, row)) for row in cur.fetchall()]
-
-
-def criar_usuario(nome, email, senha, perfil):
-    senha_hash = bcrypt.hashpw(senha.encode(), bcrypt.gensalt(12)).decode()
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO usuarios (nome, email, senha_hash, perfil) VALUES (%s, %s, %s, %s)",
-                (nome, email.lower().strip(), senha_hash, perfil)
-            )
-            conn.commit()
-
-
-def toggle_usuario(user_id, ativo):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("UPDATE usuarios SET ativo = %s, atualizado_em = NOW() WHERE id = %s", (ativo, user_id))
-            conn.commit()
-
-
-def deletar_usuario(user_id):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM usuarios WHERE id = %s", (user_id,))
-            conn.commit()
-
-
-def salvar_simulacao(dados, vendedor_email):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO historico_simulacoes (
-                    vendedor_email, empreendimento, unidade, cpf_proponente,
-                    idade, faixa_etaria, estado_civil, score_proponente,
-                    renda_proponente, qtd_clientes_adicionais, renda_clientes_adicionais,
-                    renda_total, ato_urba, percentual_ato, faixa_ato,
-                    valor_proposta, primeira_mensal, percentual_comprometimento,
-                    faixa_comprometimento, score_final, classificacao
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """, (
-                vendedor_email,
-                dados.get("empreendimento",""),
-                dados.get("unidade",""),
-                dados.get("cpf_proponente",""),
-                dados.get("idade"),
-                dados.get("faixa_idade",""),
-                dados.get("estado_civil",""),
-                dados.get("score_proponente",""),
-                dados.get("renda_proponente",0),
-                dados.get("qtd_clientes_adicionais",0),
-                dados.get("renda_adicionais",0),
-                dados.get("renda_total",0),
-                dados.get("ato_urba",0),
-                dados.get("perc_ato",0),
-                dados.get("faixa_at",""),
-                dados.get("valor_proposta",0),
-                dados.get("primeira_mensal",0),
-                dados.get("perc_comp",0),
-                dados.get("faixa_comp",""),
-                dados.get("score_final",0),
-                dados.get("classificacao",""),
-            ))
-            conn.commit()
-
-
-def carregar_historico():
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT data_hora, vendedor_email, empreendimento, unidade, cpf_proponente,
-                       idade, faixa_etaria, estado_civil, score_proponente,
-                       renda_proponente, qtd_clientes_adicionais, renda_clientes_adicionais,
-                       renda_total, ato_urba, percentual_ato, faixa_ato,
-                       valor_proposta, primeira_mensal, percentual_comprometimento,
-                       faixa_comprometimento, score_final, classificacao
-                FROM historico_simulacoes ORDER BY data_hora DESC
-            """)
-            cols = [
-                "Data/Hora","Vendedor","Empreendimento","Unidade","CPF",
-                "Idade","Faixa Etária","Estado Civil","Score SPC",
-                "Renda Proponente","Qtd Adicionais","Renda Adicionais",
-                "Renda Total","Ato Urba","% Ato","Faixa Ato",
-                "Valor Proposta","1ª Mensal","% Comprometimento",
-                "Faixa Comprometimento","Score Final","Classificação"
-            ]
-            rows = cur.fetchall()
-            return pd.DataFrame(rows, columns=cols) if rows else pd.DataFrame(columns=cols)
-
-
-def limpar_historico():
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM historico_simulacoes")
-            conn.commit()
+def db_execute(sql, params=None):
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute(sql, params or ())
+    conn.commit()
 
 
 # ============================================================
-# AUTENTICAÇÃO — TELA DE LOGIN
+# AUTENTICAÇÃO
 # ============================================================
-if "usuario_logado" not in st.session_state:
-    st.session_state.usuario_logado = None
-if "pagina" not in st.session_state:
-    st.session_state.pagina = "Simulador"
+def verificar_login(email, senha):
+    rows = db_query(
+        "SELECT id, nome, email, senha_hash, perfil, ativo FROM usuarios WHERE email = %s",
+        (email.strip().lower(),),
+    )
+    if not rows:
+        return None, "E-mail não encontrado."
+    u = rows[0]
+    if not u["ativo"]:
+        return None, "Usuário inativo. Contate o administrador."
+    if not bcrypt.checkpw(senha.encode(), u["senha_hash"].encode()):
+        return None, "Senha incorreta."
+    return dict(u), None
 
-if not st.session_state.usuario_logado:
+
+def hash_senha(senha):
+    return bcrypt.hashpw(senha.encode(), bcrypt.gensalt(12)).decode()
+
+
+# ============================================================
+# ESTADO DE SESSÃO
+# ============================================================
+for k, v in {
+    "logado": False,
+    "usuario": None,
+    "pagina": "Simulador",
+    "resultado": None,
+}.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+
+# ============================================================
+# TELA DE LOGIN
+# ============================================================
+if not st.session_state.logado:
     st.markdown(f"""
     <style>
-    [data-testid="stAppViewContainer"] {{
-        background: {CINZA_CL} !important;
-    }}
-    .login-wrapper {{
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        min-height: 80vh;
-    }}
-    .login-card {{
-        background: {BRANCO};
-        border: 1.5px solid {CINZA_BORDA};
-        border-radius: 20px;
-        padding: 40px 44px 36px;
-        max-width: 420px;
-        width: 100%;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.08);
-        text-align: center;
-    }}
-    .login-logo {{
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 10px;
-        margin-bottom: 6px;
-    }}
-    .login-brand {{
-        font-size: 2rem;
-        font-weight: 800;
-        color: {VERDE};
-        letter-spacing: -0.03em;
-    }}
-    .login-sub {{
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-        color: {CINZA_MED};
-        margin-bottom: 28px;
-    }}
-    .login-title {{
-        font-size: 1.25rem;
-        font-weight: 700;
-        color: {CINZA_ESC};
-        margin-bottom: 4px;
-    }}
-    .login-desc {{
-        font-size: 0.88rem;
-        color: {CINZA_MED};
-        margin-bottom: 24px;
+    html, body, [data-testid="stAppViewContainer"] {{
+        background-color: #F4F6F8 !important;
     }}
     </style>
     """, unsafe_allow_html=True)
 
-    _, col, _ = st.columns([1, 1.4, 1])
+    _, col, _ = st.columns([1.5, 1, 1.5])
     with col:
+        # Logo textual Urba
         st.markdown(f"""
-        <div class="login-card">
-          <div class="login-logo">
-            {LOGO_SVG}
-            <span class="login-brand">Urba</span>
-          </div>
-          <div class="login-sub">Simulador de Score de Vendas</div>
-          <div class="login-title">Bem-vindo de volta</div>
-          <div class="login-desc">Acesse com suas credenciais para continuar.</div>
+        <div style="text-align:center; margin-bottom:8px; margin-top:40px;">
+            <div style="display:inline-block; background:{URBA_GREEN}; border-radius:16px;
+                        padding:14px 28px; margin-bottom:12px;">
+                <span style="color:#FFFFFF; font-size:2rem; font-weight:900;
+                             letter-spacing:-0.02em;">Urba</span>
+            </div>
+            <div style="color:{URBA_MUTED}; font-size:0.78rem; font-weight:700;
+                        letter-spacing:0.12em; text-transform:uppercase;
+                        margin-bottom:4px;">Simulador de Score de Vendas</div>
         </div>
         """, unsafe_allow_html=True)
 
-        email_in = st.text_input("E-mail", placeholder="nome@urba.com.br", key="login_email")
-        senha_in = st.text_input("Senha", type="password", placeholder="••••••••", key="login_senha")
+        with st.container(border=True):
+            st.markdown(f"""
+            <div style="text-align:center; padding:8px 0 16px;">
+                <div style="font-size:1.4rem; font-weight:800; color:{URBA_TEXT};">
+                    Bem-vindo de volta
+                </div>
+                <div style="color:{URBA_MUTED}; font-size:0.9rem; margin-top:4px;">
+                    Acesse com suas credenciais para continuar.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
-        if st.button("ENTRAR", type="primary", use_container_width=True, key="btn_entrar"):
-            if not email_in or not senha_in:
-                st.error("Preencha e-mail e senha.")
-            else:
-                usuario = autenticar_usuario(email_in, senha_in)
-                if usuario:
-                    st.session_state.usuario_logado = usuario
-                    st.session_state.pagina = "Simulador"
-                    st.rerun()
+            email_in = st.text_input(
+                "E-mail",
+                placeholder="nome@urba.com.br",
+                key="login_email",
+            )
+            senha_in = st.text_input(
+                "Senha",
+                type="password",
+                placeholder="••••••••",
+                key="login_senha",
+            )
+
+            if st.button("ENTRAR", type="primary", use_container_width=True, key="btn_login"):
+                if not email_in or not senha_in:
+                    st.error("Preencha e-mail e senha.")
                 else:
-                    st.error("E-mail ou senha incorretos, ou usuário inativo.")
+                    usuario, erro = verificar_login(email_in, senha_in)
+                    if erro:
+                        st.error(erro)
+                    else:
+                        st.session_state.logado  = True
+                        st.session_state.usuario = usuario
+                        st.session_state.pagina  = "Simulador"
+                        st.rerun()
+
+        st.markdown(f"""
+        <div style="text-align:center; margin-top:16px; color:{URBA_MUTED};
+                    font-size:0.78rem;">
+            Projeto Defensores do Contrato · Urba
+        </div>
+        """, unsafe_allow_html=True)
+
     st.stop()
 
-# ============================================================
-# USUÁRIO LOGADO
-# ============================================================
-usuario = st.session_state.usuario_logado
-eh_admin = usuario["perfil"] == "ADMINISTRADOR"
 
-# ── SIDEBAR ──
+# ============================================================
+# SIDEBAR — PÓS LOGIN
+# ============================================================
+usuario = st.session_state.usuario
+is_admin = usuario["perfil"] == "ADMINISTRADOR"
+
 with st.sidebar:
+    # Logo na sidebar
     st.markdown(f"""
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
-      {LOGO_SVG_BRANCO}
-      <span style="font-size:1.5rem;font-weight:800;color:#fff;letter-spacing:-0.02em;">Urba</span>
-    </div>
-    <div style="font-size:0.68rem;font-weight:700;letter-spacing:0.14em;
-                text-transform:uppercase;color:rgba(255,255,255,0.65);
-                margin-bottom:18px;">Simulador de Score</div>
-    <hr style="border-color:rgba(255,255,255,0.2);margin:0 0 16px 0;">
-    <div style="font-size:0.95rem;font-weight:700;color:#fff;">{usuario['nome']}</div>
-    <div style="font-size:0.78rem;color:rgba(255,255,255,0.75);margin-bottom:4px;">{usuario['email']}</div>
-    <div style="display:inline-block;background:rgba(255,255,255,0.18);
-                border-radius:20px;padding:2px 10px;font-size:0.72rem;
-                font-weight:700;color:#fff;margin-bottom:16px;">
-      {'Administrador' if eh_admin else 'Vendedor'}
+    <div style="text-align:center; padding:20px 0 16px;">
+        <div style="display:inline-block; background:rgba(255,255,255,0.15);
+                    border-radius:12px; padding:10px 22px; margin-bottom:10px;">
+            <span style="color:#FFFFFF; font-size:1.6rem; font-weight:900;
+                         letter-spacing:-0.02em;">Urba</span>
+        </div>
+        <div style="color:rgba(255,255,255,0.7); font-size:0.68rem; font-weight:700;
+                    letter-spacing:0.1em; text-transform:uppercase;">
+            Simulador de Score
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
-    if st.button("Sair", use_container_width=True, key="btn_sair"):
-        st.session_state.usuario_logado = None
-        st.session_state.pagina = "Simulador"
-        st.session_state.pop("resultado", None)
-        st.rerun()
+    st.divider()
+
+    st.markdown(f"""
+    <div style="padding:0 4px 12px;">
+        <div style="font-size:0.95rem; font-weight:700; color:#FFFFFF;">
+            {usuario['nome']}
+        </div>
+        <div style="font-size:0.78rem; color:rgba(255,255,255,0.7); margin-top:2px;">
+            {usuario['email']}
+        </div>
+        <div style="display:inline-block; margin-top:8px; background:rgba(255,255,255,0.2);
+                    border-radius:20px; padding:3px 12px; font-size:0.72rem;
+                    font-weight:700; color:#FFFFFF; letter-spacing:0.05em;">
+            {'Administrador' if is_admin else 'Vendedor'}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     st.divider()
-    st.caption("Versão 16.3 • Urba")
+
+    if st.button("Sair", use_container_width=True, key="btn_sair"):
+        for k in ["logado", "usuario", "pagina", "resultado"]:
+            st.session_state[k] = {"logado": False, "usuario": None,
+                                    "pagina": "Simulador", "resultado": None}[k]
+        st.rerun()
 
 
 # ============================================================
-# HERO HEADER
+# HEADER PRINCIPAL
 # ============================================================
 st.markdown(f"""
-<div style="background:linear-gradient(135deg,{VERDE_ESC} 0%,{VERDE} 100%);
-            border-radius:16px;padding:24px 28px 20px;margin-bottom:20px;
-            box-shadow:0 4px 20px rgba(7,157,86,0.18);">
-  <div style="display:flex;align-items:center;gap:14px;">
-    <div>{LOGO_SVG_BRANCO}</div>
-    <div>
-      <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.14em;
-                  text-transform:uppercase;color:rgba(255,255,255,0.75);margin-bottom:3px;">
-        Projeto Defensores do Contrato
-      </div>
-      <div style="font-size:clamp(1.5rem,2.5vw,2rem);font-weight:800;
-                  color:#fff;line-height:1.1;letter-spacing:-0.02em;">
-        Simulador de Score de Vendas
-      </div>
-      <div style="font-size:0.88rem;color:rgba(255,255,255,0.8);margin-top:4px;">
-        Avaliação estruturada do risco de distrato no momento da venda.
-      </div>
+<div style="background:linear-gradient(135deg, {URBA_GREEN_DARK} 0%, {URBA_GREEN} 100%);
+            border-radius:16px; padding:24px 32px; margin-bottom:24px;
+            box-shadow:0 4px 20px rgba(7,157,86,0.2);">
+    <div style="display:flex; align-items:center; justify-content:space-between;">
+        <div>
+            <div style="color:rgba(255,255,255,0.75); font-size:0.72rem; font-weight:700;
+                        letter-spacing:0.12em; text-transform:uppercase; margin-bottom:6px;">
+                Projeto Defensores do Contrato
+            </div>
+            <div style="color:#FFFFFF; font-size:clamp(1.5rem,3vw,2.2rem);
+                        font-weight:800; line-height:1.1; letter-spacing:-0.02em;">
+                Simulador de Score de Vendas
+            </div>
+            <div style="color:rgba(255,255,255,0.8); font-size:0.9rem; margin-top:6px;">
+                Avaliação estruturada do risco de distrato no momento da venda.
+            </div>
+        </div>
+        <div style="background:rgba(255,255,255,0.15); border-radius:8px;
+                    padding:6px 14px; font-size:0.78rem; font-weight:700;
+                    color:#FFFFFF; letter-spacing:0.05em;">
+            V16.4
+        </div>
     </div>
-    <div style="margin-left:auto;">
-      <span style="background:rgba(255,255,255,0.18);border-radius:20px;
-                   padding:4px 12px;font-size:0.75rem;font-weight:700;color:#fff;">
-        V16.3
-      </span>
-    </div>
-  </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ── NAVEGAÇÃO ──
-nav_cols = st.columns([1, 1, 1, 3])
+# ============================================================
+# NAVEGAÇÃO
+# ============================================================
+nav_cols = st.columns([1, 1, 1, 4])
 with nav_cols[0]:
-    if st.button("Simulador",
-                 type="primary" if st.session_state.pagina == "Simulador" else "secondary",
-                 use_container_width=True, key="nav_sim"):
+    if st.button(
+        "Simulador",
+        type="primary" if st.session_state.pagina == "Simulador" else "secondary",
+        use_container_width=True,
+        key="nav_sim",
+    ):
         st.session_state.pagina = "Simulador"
         st.rerun()
+
 with nav_cols[1]:
-    if eh_admin:
-        if st.button("Histórico",
-                     type="primary" if st.session_state.pagina == "Histórico" else "secondary",
-                     use_container_width=True, key="nav_hist"):
-            st.session_state.pagina = "Histórico"
+    if is_admin:
+        if st.button(
+            "Historico",
+            type="primary" if st.session_state.pagina == "Historico" else "secondary",
+            use_container_width=True,
+            key="nav_hist",
+        ):
+            st.session_state.pagina = "Historico"
             st.rerun()
     else:
-        st.button("Histórico", disabled=True, use_container_width=True, key="nav_hist_off")
+        st.button("Historico", disabled=True, use_container_width=True, key="nav_hist_off")
+
 with nav_cols[2]:
-    if eh_admin:
-        if st.button("Usuários",
-                     type="primary" if st.session_state.pagina == "Usuários" else "secondary",
-                     use_container_width=True, key="nav_usr"):
-            st.session_state.pagina = "Usuários"
+    if is_admin:
+        if st.button(
+            "Usuarios",
+            type="primary" if st.session_state.pagina == "Usuarios" else "secondary",
+            use_container_width=True,
+            key="nav_usr",
+        ):
+            st.session_state.pagina = "Usuarios"
             st.rerun()
     else:
-        st.button("Usuários", disabled=True, use_container_width=True, key="nav_usr_off")
+        st.button("Usuarios", disabled=True, use_container_width=True, key="nav_usr_off")
+
+with nav_cols[3]:
+    if is_admin:
+        st.caption("Perfil: Administrador · Acesso total liberado")
+    else:
+        st.caption(f"Perfil: Vendedor · {usuario['email']}")
 
 st.divider()
-
-
-# ============================================================
-# TIMEZONE
-# ============================================================
-TIMEZONE_BRASILIA = ZoneInfo("America/Sao_Paulo")
 
 
 # ============================================================
@@ -793,7 +649,7 @@ NOTAS_ATO = {
 }
 
 NOTAS_COMPROMETIMENTO = {
-    "ATÉ 10%":       5,
+    "ATE 10%":       5,
     "10% A 20%":     4,
     "20% A 30%":     3,
     "30% A 50%":     2,
@@ -802,11 +658,11 @@ NOTAS_COMPROMETIMENTO = {
 }
 
 NOTAS_IDADE = {
-    "60+ ANOS":      5,
-    "45 A 60 ANOS":  4,
-    "35 A 45 ANOS":  3,
-    "ATÉ 25 ANOS":   2,
-    "25 A 35 ANOS":  1,
+    "60+ ANOS":     5,
+    "45 A 60 ANOS": 4,
+    "35 A 45 ANOS": 3,
+    "ATE 25 ANOS":  2,
+    "25 A 35 ANOS": 1,
 }
 
 NOTAS_ESTADO_CIVIL = {
@@ -815,7 +671,7 @@ NOTAS_ESTADO_CIVIL = {
     "SOLTEIRO(A)":   1,
 }
 
-SCORE_MAX       = sum([5*5, 5*5, 5*4, 5*1, 3*1])  # = 78
+SCORE_MAX       = 78
 LIMITE_BAIXO    = 54
 LIMITE_MODERADO = 33
 
@@ -837,16 +693,18 @@ def normalizar(texto):
 
 
 def moeda_para_float(valor):
-    texto = str(valor or "").strip().replace("R$", "").replace(" ", "")
-    if not texto:
+    if valor is None:
         return 0.0
-    if "," in texto:
-        texto = texto.replace(".", "").replace(",", ".")
+    s = str(valor).strip().replace("R$", "").replace(" ", "")
+    if not s:
+        return 0.0
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
     else:
-        if texto.count(".") > 1:
-            texto = texto.replace(".", "")
+        if s.count(".") > 1:
+            s = s.replace(".", "")
     try:
-        return max(0.0, float(texto))
+        return max(0.0, float(s))
     except (TypeError, ValueError):
         return 0.0
 
@@ -865,9 +723,12 @@ def campo_moeda(label, chave, valor_inicial=0.0, ajuda=None):
     if chave not in st.session_state:
         st.session_state[chave] = float_para_moeda_input(valor_inicial)
     texto = st.text_input(
-        label, key=chave,
-        on_change=_normalizar_campo_moeda, args=(chave,),
-        help=ajuda, placeholder="0,00",
+        label,
+        key=chave,
+        on_change=_normalizar_campo_moeda,
+        args=(chave,),
+        help=ajuda,
+        placeholder="0,00",
     )
     return moeda_para_float(texto)
 
@@ -880,33 +741,48 @@ def calcular_idade(nascimento):
 
 
 def faixa_etaria(idade):
-    if idade <= 25: return "ATÉ 25 ANOS"
-    if idade <= 35: return "25 A 35 ANOS"
-    if idade <= 45: return "35 A 45 ANOS"
-    if idade <= 60: return "45 A 60 ANOS"
+    if idade <= 25:
+        return "ATE 25 ANOS"
+    if idade <= 35:
+        return "25 A 35 ANOS"
+    if idade <= 45:
+        return "35 A 45 ANOS"
+    if idade <= 60:
+        return "45 A 60 ANOS"
     return "60+ ANOS"
 
 
 def faixa_comprometimento(perc):
-    if perc <= 10:  return "ATÉ 10%"
-    if perc <= 20:  return "10% A 20%"
-    if perc <= 30:  return "20% A 30%"
-    if perc <= 50:  return "30% A 50%"
-    if perc <= 100: return "50% A 100%"
+    if perc <= 10:
+        return "ATE 10%"
+    if perc <= 20:
+        return "10% A 20%"
+    if perc <= 30:
+        return "20% A 30%"
+    if perc <= 50:
+        return "30% A 50%"
+    if perc <= 100:
+        return "50% A 100%"
     return "ACIMA DE 100%"
 
 
 def faixa_ato(perc):
-    if perc > 4:  return "ACIMA DE 4%"
-    if perc >= 3: return "3% A 4%"
-    if perc >= 2: return "2% A 3%"
-    if perc >= 1: return "1% A 2%"
+    if perc > 4:
+        return "ACIMA DE 4%"
+    if perc >= 3:
+        return "3% A 4%"
+    if perc >= 2:
+        return "2% A 3%"
+    if perc >= 1:
+        return "1% A 2%"
     return "ABAIXO DE 1%"
 
 
 def classificar(score):
-    if score >= LIMITE_BAIXO:    return "BAIXO RISCO",    "green"
-    if score >= LIMITE_MODERADO: return "RISCO MODERADO", "orange"
+    if score >= LIMITE_BAIXO:
+        return "BAIXO RISCO", "green"
+    if score >= LIMITE_MODERADO:
+        return "RISCO MODERADO", "orange"
     return "ALTO RISCO", "red"
 
 
@@ -916,9 +792,12 @@ def calcular_score_total(notas):
 
 def mapear_score(letra):
     letra = (letra or "").upper()
-    if letra in ("A", "B"): return "A - B"
-    if letra in ("C", "D"): return "C - D"
-    if letra in ("E", "F"): return "E - F"
+    if letra in ("A", "B"):
+        return "A - B"
+    if letra in ("C", "D"):
+        return "C - D"
+    if letra in ("E", "F"):
+        return "E - F"
     return None
 
 
@@ -931,7 +810,9 @@ def formatar_cpf(digitos):
 # ============================================================
 def extrair_dados_spc(pdf_file):
     pdf_file.seek(0)
-    paginas, tabelas = [], []
+    paginas = []
+    tabelas = []
+
     with pdfplumber.open(pdf_file) as pdf:
         for numero, page in enumerate(pdf.pages, start=1):
             texto = page.extract_text(x_tolerance=2, y_tolerance=3) or ""
@@ -1015,17 +896,17 @@ def extrair_dados_spc(pdf_file):
                 break
 
     return {
-        "score_letra":    score_letra,
-        "score_faixa":    score_faixa,
+        "score_letra":     score_letra,
+        "score_faixa":     score_faixa,
         "renda_presumida": renda,
         "data_nascimento": data_nascimento,
-        "cpf":            cpf,
-        "texto_extraido": texto_completo,
+        "cpf":             cpf,
+        "texto_extraido":  texto_completo,
     }
 
 
 # ============================================================
-# CENÁRIOS (preservado do V15.0)
+# CENÁRIOS (preservados do V15.0)
 # ============================================================
 def renda_minima_para_comprometimento(mensal, limite_pct):
     if mensal <= 0 or limite_pct <= 0:
@@ -1043,34 +924,41 @@ def ato_minimo_para_percentual(valor_proposta, pct):
 
 def montar_cenarios(score_atual, notas, renda_total, mensal, ato, valor_proposta):
     cenarios = []
-    for pct_meta, faixa_meta in [
-        (1.00, "1% A 2%"), (2.00, "2% A 3%"),
-        (3.00, "3% A 4%"), (4.01, "ACIMA DE 4%"),
-    ]:
+
+    metas_ato = [
+        (1.00, "1% A 2%"),
+        (2.00, "2% A 3%"),
+        (3.00, "3% A 4%"),
+        (4.01, "ACIMA DE 4%"),
+    ]
+    for pct_meta, faixa_meta in metas_ato:
         nova_nota = NOTAS_ATO[faixa_meta]
         ganho = (nova_nota - notas["ato"]) * PESOS["ato"]
         ato_alvo = ato_minimo_para_percentual(valor_proposta, pct_meta)
         adicional = max(0, ato_alvo - ato)
         if ganho > 0 and adicional > 0:
             cenarios.append({
-                "Variável": "Ato",
-                "Ajuste": f"Aumentar o ato para aprox. {brl(ato_alvo)} (+{brl(adicional)}; ≈ {pct_meta:.2f}% da proposta)",
+                "Variavel": "Ato",
+                "Ajuste": f"Aumentar o ato para aprox. {brl(ato_alvo)} (+{brl(adicional)}; ~{pct_meta:.2f}% da proposta)",
                 "Ganho": ganho,
                 "NovoScore": score_atual + ganho,
             })
 
-    for limite, faixa_meta in [
-        (50, "30% A 50%"), (30, "20% A 30%"),
-        (20, "10% A 20%"), (10, "ATÉ 10%"),
-    ]:
+    metas_comp = [
+        (50, "30% A 50%"),
+        (30, "20% A 30%"),
+        (20, "10% A 20%"),
+        (10, "ATE 10%"),
+    ]
+    for limite, faixa_meta in metas_comp:
         nova_nota = NOTAS_COMPROMETIMENTO[faixa_meta]
         ganho = (nova_nota - notas["comprometimento_renda"]) * PESOS["comprometimento_renda"]
         if ganho > 0:
             renda_alvo = renda_minima_para_comprometimento(mensal, limite)
             mensal_alvo = mensal_maxima_para_comprometimento(renda_total, limite)
             cenarios.append({
-                "Variável": "Renda / Mensal",
-                "Ajuste": f"Para comprometimento ≤ {limite}%: renda total ≈ {brl(renda_alvo)} OU mensal ≤ {brl(mensal_alvo)}",
+                "Variavel": "Renda / Mensal",
+                "Ajuste": f"Para comprometimento <= {limite}%: renda total ~{brl(renda_alvo)} OU mensal <= {brl(mensal_alvo)}",
                 "Ganho": ganho,
                 "NovoScore": score_atual + ganho,
             })
@@ -1084,20 +972,57 @@ def montar_cenarios(score_atual, notas, renda_total, mensal, ato, valor_proposta
 
 
 # ============================================================
-# ESTADO DA SESSÃO
+# HELPERS DE UI
 # ============================================================
-if "resultado" not in st.session_state:
-    st.session_state.resultado = None
+def secao(titulo):
+    st.markdown(f"""
+    <div style="display:flex; align-items:center; gap:10px; margin:20px 0 8px;">
+        <div style="width:4px; height:22px; background:{URBA_GREEN};
+                    border-radius:2px; flex-shrink:0;"></div>
+        <span style="font-size:1rem; font-weight:700; color:{URBA_TEXT};
+                     letter-spacing:-0.01em;">{titulo}</span>
+    </div>
+    """, unsafe_allow_html=True)
 
 
-# ============================================================
-# HELPER: CARD DE RESUMO
-# ============================================================
-def resumo_card(coluna, titulo, valor):
-    with coluna:
-        with st.container(border=True):
-            st.caption(titulo)
-            st.markdown(f"**{valor if valor not in (None, '') else '—'}**")
+def card_resumo(col, titulo, valor):
+    with col:
+        st.markdown(f"""
+        <div style="background:{URBA_CARD}; border:1px solid {URBA_BORDER};
+                    border-radius:10px; padding:14px 16px; height:80px;">
+            <div style="font-size:0.72rem; font-weight:700; color:{URBA_MUTED};
+                        text-transform:uppercase; letter-spacing:0.05em;
+                        margin-bottom:6px;">{titulo}</div>
+            <div style="font-size:0.95rem; font-weight:700; color:{URBA_TEXT};
+                        overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                {valor if valor not in (None, '', '—') else '—'}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+def badge_classificacao(classificacao, score, score_max):
+    cores = {
+        "BAIXO RISCO":    (URBA_GREEN,      "#E8F8EF", "Baixo Risco"),
+        "RISCO MODERADO": (URBA_ORANGE,     "#FFF4E8", "Risco Moderado"),
+        "ALTO RISCO":     (URBA_GREEN_DARK, "#E8F8EF", "Alto Risco"),
+    }
+    cor_texto, cor_bg, label = cores.get(classificacao, ("#6B7280", "#F4F6F8", classificacao))
+    st.markdown(f"""
+    <div style="background:{cor_bg}; border:2px solid {cor_texto};
+                border-radius:14px; padding:20px 24px; text-align:center;">
+        <div style="font-size:2.2rem; font-weight:900; color:{cor_texto};
+                    letter-spacing:-0.02em;">{score}</div>
+        <div style="font-size:0.78rem; color:{URBA_MUTED}; margin:2px 0 10px;">
+            de {score_max} pontos
+        </div>
+        <div style="background:{cor_texto}; color:#FFFFFF; border-radius:20px;
+                    padding:6px 18px; font-size:0.85rem; font-weight:800;
+                    display:inline-block; letter-spacing:0.04em;">
+            {label}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # ============================================================
@@ -1105,35 +1030,38 @@ def resumo_card(coluna, titulo, valor):
 # ============================================================
 if st.session_state.pagina == "Simulador":
 
-    st.markdown(f"""
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-      <span style="font-size:1.15rem;font-weight:700;color:{VERDE_ESC};">Dados da Simulação</span>
-    </div>
-    <p style="color:{CINZA_MED};font-size:0.88rem;margin-bottom:18px;">
-      Preencha as informações abaixo para calcular o score de risco da venda.
-    </p>
-    """, unsafe_allow_html=True)
+    secao("Dados da Simulação")
+    st.caption("Preencha as informações abaixo para calcular o score de risco da venda.")
 
-    bloco_emp, bloco_cliente, bloco_proposta, bloco_renda = st.columns(4, gap="large")
+    col_emp, col_cli, col_prop, col_renda = st.columns(4, gap="large")
 
     # ── EMPREENDIMENTO ──
-    with bloco_emp:
-        st.markdown(f"<div style='font-weight:700;color:{VERDE_ESC};margin-bottom:10px;'>Empreendimento</div>", unsafe_allow_html=True)
+    with col_emp:
+        st.markdown(f"**Empreendimento**")
+        st.caption("Selecione o empreendimento e a unidade.")
 
         if cadastro.empty:
-            st.error("Cadastro de empreendimentos não carregado.")
+            st.error("Cadastro de empreendimentos nao carregado.")
             if erro_cadastro:
-                with st.expander("Detalhes técnicos"):
+                with st.expander("Detalhes"):
                     st.code(erro_cadastro)
 
         empreendimentos = sorted(
             cadastro["Empreendimento"].dropna().astype(str).str.strip()
             .loc[lambda x: x.ne("")].unique().tolist()
         )
-        empreendimento = st.selectbox("Empreendimento *", [""] + empreendimentos, index=0, key="empreendimento_v16")
+
+        empreendimento = st.selectbox(
+            "Empreendimento *",
+            [""] + empreendimentos,
+            index=0,
+            key="empreendimento_v16",
+        )
 
         if empreendimento:
-            cad_emp = cadastro[cadastro["Empreendimento"].astype(str).str.strip() == str(empreendimento).strip()].copy()
+            cad_emp = cadastro[
+                cadastro["Empreendimento"].astype(str).str.strip() == str(empreendimento).strip()
+            ].copy()
         else:
             cad_emp = cadastro.iloc[0:0].copy()
 
@@ -1144,40 +1072,49 @@ if st.session_state.pagina == "Simulador":
         )
 
         def rotulo_unidade(valor):
-            if not valor: return "Selecione a unidade"
+            if not valor:
+                return "Selecione a unidade"
             texto = str(valor).strip()
             emp = str(empreendimento or "").strip()
             if emp and texto.upper().startswith(emp.upper()):
                 curto = texto[len(emp):].lstrip(" -–—")
-                if curto: return curto
+                if curto:
+                    return curto
             return texto
 
         unidade = st.selectbox(
-            "Unidade *", [""] + unidades, index=0,
+            "Unidade *",
+            [""] + unidades,
+            index=0,
             disabled=not bool(empreendimento),
-            key="unidade_v16", format_func=rotulo_unidade,
+            key="unidade_v16",
+            format_func=rotulo_unidade,
         )
         if unidade:
-            st.caption(f"Unidade selecionada: **{rotulo_unidade(unidade)}**")
+            st.caption(f"Unidade: {rotulo_unidade(unidade)}")
 
     # ── PERFIL DO CLIENTE ──
-    with bloco_cliente:
-        st.markdown(f"<div style='font-weight:700;color:{VERDE_ESC};margin-bottom:10px;'>Perfil do Cliente</div>", unsafe_allow_html=True)
-        st.caption("Anexe o relatório SPC do proponente.")
+    with col_cli:
+        st.markdown(f"**Perfil do Cliente**")
+        st.caption("Anexe o relatorio SPC do proponente.")
 
-        pdf_prop = st.file_uploader("SPC do Proponente *", type=["pdf"], key="pdf_prop_v16")
+        pdf_prop = st.file_uploader(
+            "SPC do Proponente *",
+            type=["pdf"],
+            key="pdf_prop_v16",
+        )
 
-        dados_spc_prop = None
+        dados_spc_prop  = None
         score_proponente = None
         renda_proponente = 0.0
-        nascimento = None
-        idade = None
-        faixa_idade = None
-        cpf_proponente = ""
+        nascimento       = None
+        idade            = None
+        faixa_idade      = None
+        cpf_proponente   = ""
 
         if pdf_prop:
             try:
-                with st.spinner("Lendo SPC do proponente..."):
+                with st.spinner("Lendo SPC..."):
                     dados_spc_prop = extrair_dados_spc(pdf_prop)
 
                 score_proponente = dados_spc_prop.get("score_faixa")
@@ -1189,67 +1126,91 @@ if st.session_state.pagina == "Simulador":
 
                 st.markdown("**Dados identificados no SPC**")
                 with st.container(border=True):
-                    st.caption("CPF do Proponente")
-                    st.markdown(f"**{cpf_proponente if cpf_proponente else '—'}**")
-                    if not cpf_proponente:
-                        st.warning("CPF não localizado no SPC.")
+                    if cpf_proponente:
+                        st.caption("CPF")
+                        st.markdown(f"**{cpf_proponente}**")
+                    else:
+                        st.warning("CPF nao localizado.")
 
                     if nascimento:
-                        st.caption("Data de Nascimento")
-                        st.markdown(f"**{nascimento.strftime('%d/%m/%Y')}**")
-                        st.caption(f"Idade: **{idade} anos** • Faixa: **{faixa_idade}**")
+                        st.caption("Nascimento / Idade")
+                        st.markdown(f"**{nascimento.strftime('%d/%m/%Y')}** · {idade} anos · {faixa_idade}")
                     else:
-                        st.warning("Data de nascimento não localizada.")
+                        st.warning("Data de nascimento nao localizada.")
 
-                    st.caption("Score")
                     if score_proponente:
-                        st.markdown(f"**{dados_spc_prop.get('score_letra') or '—'} → {score_proponente}**")
+                        st.caption("Score")
+                        st.markdown(f"**{dados_spc_prop.get('score_letra')} → {score_proponente}**")
                     else:
-                        st.warning("Score não localizado no SPC.")
+                        st.warning("Score nao localizado.")
 
-                    st.caption("Renda Presumida")
                     if renda_proponente > 0:
+                        st.caption("Renda Presumida")
                         st.markdown(f"**{brl(renda_proponente)}**")
                     else:
-                        st.warning("Renda não localizada no SPC.")
+                        st.warning("Renda nao localizada.")
 
             except Exception as e:
                 st.error(f"Falha na leitura do SPC: {e}")
 
         if pdf_prop and not cpf_proponente:
-            cpf_proponente = st.text_input("CPF — preenchimento manual", placeholder="000.000.000-00", key="cpf_manual_v16").strip()
+            cpf_proponente = st.text_input(
+                "CPF (manual)",
+                placeholder="000.000.000-00",
+                key="cpf_manual_v16",
+            ).strip()
 
         if pdf_prop and not score_proponente:
-            score_proponente = st.selectbox("Score SPC — preenchimento manual", ["", "A - B", "C - D", "E - F"], key="score_manual_v16")
+            score_proponente = st.selectbox(
+                "Score SPC (manual)",
+                ["", "A - B", "C - D", "E - F"],
+                key="score_manual_v16",
+            )
 
         if pdf_prop and renda_proponente <= 0:
-            renda_proponente = campo_moeda("Renda Presumida — manual (R$)", "renda_manual_v16")
+            renda_proponente = campo_moeda(
+                "Renda Presumida (manual) R$",
+                "renda_manual_v16",
+            )
 
         estado_civil = st.selectbox(
             "Estado Civil *",
             ["", "SOLTEIRO(A)", "DIVORCIADO(A)", "CASADO(A)"],
-            index=0, key="estado_civil_v16",
+            key="estado_civil_v16",
         )
 
     # ── DADOS DA PROPOSTA ──
-    with bloco_proposta:
-        st.markdown(f"<div style='font-weight:700;color:{VERDE_ESC};margin-bottom:10px;'>Dados da Proposta</div>", unsafe_allow_html=True)
-        ato_urba        = campo_moeda("Ato Urba (R$) *",                    "ato_urba_v16")
-        valor_proposta  = campo_moeda("Valor da Proposta / Líquido CV (R$) *", "valor_proposta_v16")
-        primeira_mensal = campo_moeda("Valor da 1ª Mensal (R$) *",          "primeira_mensal_v16")
+    with col_prop:
+        st.markdown(f"**Dados da Proposta**")
+        st.caption("Valores financeiros da operacao.")
+
+        ato_urba       = campo_moeda("Ato Urba (R$) *",                  "ato_urba_v16")
+        valor_proposta = campo_moeda("Valor da Proposta / Liquido CV (R$) *", "valor_proposta_v16")
+        primeira_mensal = campo_moeda("Valor da 1a Mensal (R$) *",        "primeira_mensal_v16")
 
     # ── COMPOSIÇÃO DE RENDA ──
-    with bloco_renda:
-        st.markdown(f"<div style='font-weight:700;color:{VERDE_ESC};margin-bottom:10px;'>Composição de Renda</div>", unsafe_allow_html=True)
+    with col_renda:
+        st.markdown(f"**Composicao de Renda**")
         st.caption("Use somente quando houver cliente adicional compondo renda.")
 
-        qtd_adicionais = st.number_input("Clientes adicionais", min_value=0, max_value=4, value=0, step=1, key="qtd_adicionais_v16")
+        qtd_adicionais = st.number_input(
+            "Clientes adicionais",
+            min_value=0,
+            max_value=4,
+            value=0,
+            step=1,
+            key="qtd_adicionais_v16",
+        )
 
         rendas_adicionais = []
         for i in range(int(qtd_adicionais)):
             numero = i + 2
             with st.expander(f"Cliente {numero}", expanded=True):
-                pdf_add = st.file_uploader(f"SPC — Cliente {numero}", type=["pdf"], key=f"pdf_add_v16_{numero}")
+                pdf_add = st.file_uploader(
+                    f"SPC — Cliente {numero}",
+                    type=["pdf"],
+                    key=f"pdf_add_v16_{numero}",
+                )
                 renda_add = 0.0
                 if pdf_add:
                     try:
@@ -1258,14 +1219,17 @@ if st.session_state.pagina == "Simulador":
                         if renda_add:
                             st.success(f"Renda: {brl(renda_add)}")
                         else:
-                            st.warning("Renda não localizada.")
+                            st.warning("Renda nao localizada.")
                     except Exception as e:
                         st.error(f"Falha: {e}")
                 if pdf_add and renda_add <= 0:
-                    renda_add = campo_moeda(f"Renda manual — Cliente {numero} (R$)", f"renda_add_v16_{numero}")
+                    renda_add = campo_moeda(
+                        f"Renda manual — Cliente {numero} (R$)",
+                        f"renda_add_v16_{numero}",
+                    )
                 rendas_adicionais.append(renda_add)
 
-    # ── CÁLCULOS INSTANTÂNEOS ──
+    # ── INDICADORES INSTANTÂNEOS ──
     renda_total = renda_proponente + sum(rendas_adicionais)
     perc_ato    = ato_urba / valor_proposta * 100 if valor_proposta > 0 else 0
     perc_comp   = primeira_mensal / renda_total * 100 if renda_total > 0 else 0
@@ -1273,32 +1237,36 @@ if st.session_state.pagina == "Simulador":
     faixa_comp  = faixa_comprometimento(perc_comp)
 
     st.divider()
-    i1, i2, i3, i4 = st.columns(4)
-    i1.metric("% do Ato",       f"{perc_ato:.2f}%",  faixa_at)
-    i2.metric("Comprometimento", f"{perc_comp:.2f}%", faixa_comp)
-    i3.metric("Renda Total",     brl(renda_total))
-    i4.metric("Faixa Etária",    faixa_idade or "—")
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("% do Ato",       f"{perc_ato:.2f}%",  faixa_at)
+    m2.metric("Comprometimento", f"{perc_comp:.2f}%", faixa_comp)
+    m3.metric("Renda Total",     brl(renda_total))
+    m4.metric("Faixa Etaria",    faixa_idade or "—")
 
     # ── VALIDAÇÃO ──
     faltando = []
-    if not empreendimento:   faltando.append("Empreendimento")
-    if not unidade:          faltando.append("Unidade")
-    if not nascimento:       faltando.append("Data de Nascimento")
-    if not estado_civil:     faltando.append("Estado Civil")
-    if not pdf_prop:         faltando.append("SPC do Proponente")
-    if not score_proponente: faltando.append("Score SPC")
-    if renda_total <= 0:     faltando.append("Renda Presumida")
-    if valor_proposta <= 0:  faltando.append("Valor da Proposta")
-    if primeira_mensal <= 0: faltando.append("1ª Mensal")
+    if not empreendimento:    faltando.append("Empreendimento")
+    if not unidade:           faltando.append("Unidade")
+    if not nascimento:        faltando.append("Data de Nascimento")
+    if not estado_civil:      faltando.append("Estado Civil")
+    if not pdf_prop:          faltando.append("SPC do Proponente")
+    if not score_proponente:  faltando.append("Score SPC")
+    if renda_total <= 0:      faltando.append("Renda Presumida")
+    if valor_proposta <= 0:   faltando.append("Valor da Proposta")
+    if primeira_mensal <= 0:  faltando.append("1a Mensal")
 
     if faltando:
-        st.warning("Preencha/valide: **" + ", ".join(faltando) + "**")
+        st.info(f"Preencha para calcular: {', '.join(faltando)}")
 
-    _, botao_calc = st.columns([3, 1])
-    with botao_calc:
+    _, btn_col = st.columns([3, 1])
+    with btn_col:
         calcular = st.button(
-            "CALCULAR SIMULAÇÃO", type="primary",
-            use_container_width=True, disabled=bool(faltando), key="calcular_v16",
+            "CALCULAR SIMULACAO",
+            type="primary",
+            use_container_width=True,
+            disabled=bool(faltando),
+            key="calcular_v16",
         )
 
     if calcular:
@@ -1313,147 +1281,174 @@ if st.session_state.pagina == "Simulador":
         classificacao, cor = classificar(score_final)
 
         st.session_state.resultado = {
-            "notas": notas, "score_final": score_final,
-            "classificacao": classificacao, "cor": cor,
-            "empreendimento": empreendimento, "unidade": unidade,
-            "cpf_proponente": cpf_proponente, "idade": idade,
-            "faixa_idade": faixa_idade, "estado_civil": estado_civil,
-            "score_proponente": score_proponente,
-            "renda_proponente": renda_proponente,
+            "notas":                   notas,
+            "score_final":             score_final,
+            "classificacao":           classificacao,
+            "cor":                     cor,
+            "empreendimento":          empreendimento,
+            "unidade":                 unidade,
+            "cpf_proponente":          cpf_proponente,
+            "idade":                   idade,
+            "faixa_idade":             faixa_idade,
+            "estado_civil":            estado_civil,
+            "score_proponente":        score_proponente,
+            "renda_proponente":        renda_proponente,
             "qtd_clientes_adicionais": int(qtd_adicionais),
-            "renda_adicionais": sum(rendas_adicionais),
-            "renda_total": renda_total, "ato_urba": ato_urba,
-            "valor_proposta": valor_proposta, "perc_ato": perc_ato,
-            "faixa_at": faixa_at, "primeira_mensal": primeira_mensal,
-            "perc_comp": perc_comp, "faixa_comp": faixa_comp,
+            "renda_adicionais":        sum(rendas_adicionais),
+            "renda_total":             renda_total,
+            "ato_urba":                ato_urba,
+            "valor_proposta":          valor_proposta,
+            "perc_ato":                perc_ato,
+            "faixa_at":                faixa_at,
+            "primeira_mensal":         primeira_mensal,
+            "perc_comp":               perc_comp,
+            "faixa_comp":              faixa_comp,
         }
 
     # ── RESULTADO ──
     if st.session_state.resultado:
         d = st.session_state.resultado
-
         st.divider()
-        st.markdown(f"<div style='font-size:1.1rem;font-weight:700;color:{VERDE_ESC};margin-bottom:12px;'>Resumo da Simulação</div>", unsafe_allow_html=True)
 
+        secao("Resumo da Simulacao")
         q1, q2, q3, q4 = st.columns(4)
-        resumo_card(q1, "Empreendimento", d.get("empreendimento"))
-        unidade_resumo = d.get("unidade") or ""
-        emp_resumo = d.get("empreendimento") or ""
-        if emp_resumo and unidade_resumo.upper().startswith(emp_resumo.upper()):
-            unidade_resumo = unidade_resumo[len(emp_resumo):].lstrip(" -–—") or unidade_resumo
-        resumo_card(q2, "Unidade", unidade_resumo)
-        resumo_card(q3, "CPF do Proponente", d.get("cpf_proponente"))
-        resumo_card(q4, "Renda Total", brl(d.get("renda_total", 0)))
+        card_resumo(q1, "Empreendimento", d.get("empreendimento"))
+        unidade_r = d.get("unidade", "")
+        emp_r = d.get("empreendimento", "")
+        if emp_r and unidade_r.upper().startswith(emp_r.upper()):
+            unidade_r = unidade_r[len(emp_r):].lstrip(" -–—") or unidade_r
+        card_resumo(q2, "Unidade", unidade_r)
+        card_resumo(q3, "CPF do Proponente", d.get("cpf_proponente"))
+        card_resumo(q4, "Renda Total", brl(d.get("renda_total", 0)))
 
         p1, p2, p3, p4 = st.columns(4)
-        resumo_card(p1, "Faixa Etária",       d.get("faixa_idade"))
-        resumo_card(p2, "Estado Civil",        d.get("estado_civil"))
-        resumo_card(p3, "Score do Proponente", d.get("score_proponente"))
-        resumo_card(p4, "Ato Urba",            brl(d.get("ato_urba", 0)))
+        card_resumo(p1, "Faixa Etaria",       d.get("faixa_idade"))
+        card_resumo(p2, "Estado Civil",        d.get("estado_civil"))
+        card_resumo(p3, "Score do Proponente", d.get("score_proponente"))
+        card_resumo(p4, "Ato Urba",            brl(d.get("ato_urba", 0)))
 
         c1, c2, c3, c4 = st.columns(4)
-        resumo_card(c1, "% do Ato",         f"{d.get('perc_ato', 0):.2f}%")
-        resumo_card(c2, "1ª Mensal",         brl(d.get("primeira_mensal", 0)))
-        resumo_card(c3, "Comprometimento",   f"{d.get('perc_comp', 0):.2f}%")
-        resumo_card(c4, "Valor da Proposta", brl(d.get("valor_proposta", 0)))
+        card_resumo(c1, "% do Ato",         f"{d.get('perc_ato', 0):.2f}%")
+        card_resumo(c2, "1a Mensal",         brl(d.get("primeira_mensal", 0)))
+        card_resumo(c3, "Comprometimento",   f"{d.get('perc_comp', 0):.2f}%")
+        card_resumo(c4, "Valor da Proposta", brl(d.get("valor_proposta", 0)))
 
-        # ── AVALIAÇÃO DE RISCO ──
-        st.markdown(f"<div style='font-size:1.1rem;font-weight:700;color:{VERDE_ESC};margin:18px 0 12px;'>Avaliação de Risco</div>", unsafe_allow_html=True)
-
-        cor_map = {
-            "green":  (VERDE,   VERDE_CLARO,  "BAIXO RISCO"),
-            "orange": (LARANJA, LARANJA_CL,   "RISCO MODERADO"),
-            "red":    ("#C0392B","#FDECEA",   "ALTO RISCO"),
-        }
-        cor_hex, cor_bg, _ = cor_map[d["cor"]]
+        st.divider()
+        secao("Avaliacao de Risco")
 
         r1, r2 = st.columns([1, 2])
         with r1:
-            st.markdown(f"""
-            <div style="background:{cor_bg};border:2px solid {cor_hex};border-radius:14px;
-                        padding:22px 20px;text-align:center;">
-              <div style="font-size:0.75rem;font-weight:700;letter-spacing:0.1em;
-                          text-transform:uppercase;color:{cor_hex};margin-bottom:6px;">
-                Score Final
-              </div>
-              <div style="font-size:3rem;font-weight:800;color:{cor_hex};line-height:1;">
-                {d['score_final']}
-              </div>
-              <div style="font-size:0.8rem;color:{CINZA_MED};margin:4px 0 10px;">
-                de {SCORE_MAX} pontos
-              </div>
-              <div style="background:{cor_hex};color:#fff;border-radius:8px;
-                          padding:6px 12px;font-weight:700;font-size:0.88rem;">
-                {d['classificacao']}
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
+            badge_classificacao(d["classificacao"], d["score_final"], SCORE_MAX)
 
         with r2:
             labels = {
-                "score_credito":         "Score de Crédito",
+                "score_credito":         "Score de Credito",
                 "ato":                   "% do Ato",
                 "comprometimento_renda": "Comprometimento de Renda",
-                "idade":                 "Faixa Etária",
+                "idade":                 "Faixa Etaria",
                 "estado_civil":          "Estado Civil",
             }
-            max_nota = {"score_credito":5,"ato":5,"comprometimento_renda":5,"idade":5,"estado_civil":3}
+            max_nota = {
+                "score_credito":         5,
+                "ato":                   5,
+                "comprometimento_renda": 5,
+                "idade":                 5,
+                "estado_civil":          3,
+            }
             detalhes = []
             for var, peso in PESOS.items():
                 nota = d["notas"][var]
                 detalhes.append({
-                    "Variável": labels[var],
+                    "Variavel": labels[var],
                     "Nota":     f"{nota}/{max_nota[var]}",
                     "Peso":     peso,
                     "Pontos":   nota * peso,
-                    "Máximo":   max_nota[var] * peso,
+                    "Maximo":   max_nota[var] * peso,
                 })
             st.dataframe(
-                pd.DataFrame(detalhes), use_container_width=True, hide_index=True,
-                column_config={
-                    "Variável": st.column_config.TextColumn("Variável", width="medium"),
-                    "Nota":     st.column_config.TextColumn("Nota",     width="small"),
-                    "Peso":     st.column_config.NumberColumn("Peso",   width="small"),
-                    "Pontos":   st.column_config.NumberColumn("Pontos", width="small"),
-                    "Máximo":   st.column_config.NumberColumn("Máximo", width="small"),
-                },
+                pd.DataFrame(detalhes),
+                use_container_width=True,
+                hide_index=True,
             )
 
         # ── ESTRATÉGIAS ──
         if d["classificacao"] != "BAIXO RISCO":
             st.divider()
-            st.markdown(f"<div style='font-size:1.1rem;font-weight:700;color:{VERDE_ESC};margin-bottom:12px;'>Estratégias de Estruturação da Venda</div>", unsafe_allow_html=True)
+            secao("Estrategias de Estruturacao da Venda")
 
             falta_mod   = max(0, LIMITE_MODERADO - d["score_final"])
             falta_baixo = max(0, LIMITE_BAIXO    - d["score_final"])
-            a1, b1 = st.columns(2)
-            a1.metric("Pontos para Risco Moderado", f"+{falta_mod}")
-            b1.metric("Pontos para Baixo Risco",    f"+{falta_baixo}")
+            e1, e2 = st.columns(2)
+            e1.metric("Pontos para Risco Moderado", f"+{falta_mod}")
+            e2.metric("Pontos para Baixo Risco",    f"+{falta_baixo}")
 
             cenarios = montar_cenarios(
-                score_atual=d["score_final"], notas=d["notas"],
-                renda_total=d["renda_total"], mensal=d["primeira_mensal"],
-                ato=d["ato_urba"], valor_proposta=d["valor_proposta"],
+                score_atual=d["score_final"],
+                notas=d["notas"],
+                renda_total=d["renda_total"],
+                mensal=d["primeira_mensal"],
+                ato=d["ato_urba"],
+                valor_proposta=d["valor_proposta"],
             )
             if cenarios:
                 df_c = pd.DataFrame(cenarios)
                 df_c["Ganho"]     = df_c["Ganho"].map(lambda x: f"+{x}")
                 df_c["NovoScore"] = df_c["NovoScore"].map(str)
-                df_exib = df_c[["Variável","Ajuste","Ganho","NovoScore","NovaClassificacao"]].head(12).rename(columns={
-                    "NovoScore": "Novo Score", "NovaClassificacao": "Nova Classificação"
-                })
-                st.dataframe(df_exib, use_container_width=True, hide_index=True)
-                st.caption("As sugestões são simulações contrafactuais. Não são propostas alterações de idade, estado civil ou score cadastral.")
+                st.dataframe(
+                    df_c[["Variavel", "Ajuste", "Ganho", "NovoScore", "NovaClassificacao"]].head(12),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                st.caption("Sugestoes sao simulacoes contrafactuais. Nao alteram dados cadastrais do cliente.")
 
         # ── SALVAR ──
         st.divider()
-        st.markdown(f"<div style='font-size:1.1rem;font-weight:700;color:{VERDE_ESC};margin-bottom:6px;'>Salvar Simulação</div>", unsafe_allow_html=True)
-        st.caption("Confirme para registrar esta simulação no histórico.")
+        secao("Salvar no Historico")
+        st.caption("Confirme para registrar esta simulacao no banco de dados.")
 
-        if st.button("CONFIRMAR E SALVAR NO HISTÓRICO", type="primary", key="salvar_v16"):
+        if st.button(
+            "CONFIRMAR E SALVAR NO HISTORICO",
+            type="primary",
+            key="salvar_v16",
+        ):
             try:
-                salvar_simulacao(d, usuario["email"])
-                st.success("Simulação salva com sucesso no histórico.")
+                db_execute("""
+                    INSERT INTO historico_simulacoes (
+                        vendedor_email, empreendimento, unidade, cpf_proponente,
+                        idade, faixa_etaria, estado_civil, score_proponente,
+                        renda_proponente, qtd_clientes_adicionais,
+                        renda_clientes_adicionais, renda_total,
+                        ato_urba, percentual_ato, faixa_ato,
+                        valor_proposta, primeira_mensal,
+                        percentual_comprometimento, faixa_comprometimento,
+                        score_final, classificacao
+                    ) VALUES (
+                        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                    )
+                """, (
+                    usuario["email"],
+                    d.get("empreendimento", ""),
+                    d.get("unidade", ""),
+                    d.get("cpf_proponente", ""),
+                    d.get("idade"),
+                    d.get("faixa_idade", ""),
+                    d.get("estado_civil", ""),
+                    d.get("score_proponente", ""),
+                    d.get("renda_proponente", 0),
+                    d.get("qtd_clientes_adicionais", 0),
+                    d.get("renda_adicionais", 0),
+                    d.get("renda_total", 0),
+                    d.get("ato_urba", 0),
+                    d.get("perc_ato", 0),
+                    d.get("faixa_at", ""),
+                    d.get("valor_proposta", 0),
+                    d.get("primeira_mensal", 0),
+                    d.get("perc_comp", 0),
+                    d.get("faixa_comp", ""),
+                    d.get("score_final", 0),
+                    d.get("classificacao", ""),
+                ))
+                st.success("Simulacao salva com sucesso!")
             except Exception as e:
                 st.error(f"Erro ao salvar: {e}")
 
@@ -1461,125 +1456,173 @@ if st.session_state.pagina == "Simulador":
 # ============================================================
 # PÁGINA: HISTÓRICO
 # ============================================================
-elif st.session_state.pagina == "Histórico" and eh_admin:
+elif st.session_state.pagina == "Historico" and is_admin:
 
-    st.markdown(f"<div style='font-size:1.1rem;font-weight:700;color:{VERDE_ESC};margin-bottom:16px;'>Histórico de Simulações</div>", unsafe_allow_html=True)
+    secao("Historico de Simulacoes")
 
     try:
-        hist = carregar_historico()
+        rows = db_query("""
+            SELECT * FROM historico_simulacoes
+            ORDER BY data_hora DESC
+        """)
+        hist = pd.DataFrame(rows) if rows else pd.DataFrame()
     except Exception as e:
-        st.error(f"Erro ao carregar histórico: {e}")
+        st.error(f"Erro ao carregar historico: {e}")
         hist = pd.DataFrame()
 
     if hist.empty:
-        st.info("Nenhuma simulação registrada ainda.")
+        st.info("Nenhuma simulacao registrada ainda.")
     else:
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            vendedores = ["TODOS"] + sorted(hist["Vendedor"].dropna().unique().tolist())
-            filtro_v = st.selectbox("Vendedor", vendedores, key="filt_vend_v16")
-        with c2:
-            emps = ["TODOS"] + sorted(hist["Empreendimento"].dropna().unique().tolist())
-            filtro_e = st.selectbox("Empreendimento", emps, key="filt_emp_v16")
-        with c3:
-            classes = ["TODAS"] + sorted(hist["Classificação"].dropna().unique().tolist())
-            filtro_c = st.selectbox("Classificação", classes, key="filt_class_v16")
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            vendedores = ["TODOS"] + sorted(hist["vendedor_email"].dropna().unique().tolist())
+            filtro_v = st.selectbox("Vendedor", vendedores, key="filt_v")
+        with f2:
+            emps = ["TODOS"] + sorted(hist["empreendimento"].dropna().unique().tolist())
+            filtro_e = st.selectbox("Empreendimento", emps, key="filt_e")
+        with f3:
+            classes = ["TODAS"] + sorted(hist["classificacao"].dropna().unique().tolist())
+            filtro_c = st.selectbox("Classificacao", classes, key="filt_c")
 
         exib = hist.copy()
-        if filtro_v != "TODOS":  exib = exib[exib["Vendedor"] == filtro_v]
-        if filtro_e != "TODOS":  exib = exib[exib["Empreendimento"] == filtro_e]
-        if filtro_c != "TODAS":  exib = exib[exib["Classificação"] == filtro_c]
+        if filtro_v != "TODOS":
+            exib = exib[exib["vendedor_email"] == filtro_v]
+        if filtro_e != "TODOS":
+            exib = exib[exib["empreendimento"] == filtro_e]
+        if filtro_c != "TODAS":
+            exib = exib[exib["classificacao"] == filtro_c]
 
         k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Total",       len(exib))
-        k2.metric("Baixo Risco", int(exib["Classificação"].astype(str).str.contains("BAIXO",    na=False).sum()))
-        k3.metric("Moderado",    int(exib["Classificação"].astype(str).str.contains("MODERADO", na=False).sum()))
-        k4.metric("Alto Risco",  int(exib["Classificação"].astype(str).str.contains("ALTO",     na=False).sum()))
+        k1.metric("Total",        len(exib))
+        k2.metric("Baixo Risco",  int(exib["classificacao"].str.contains("BAIXO",    na=False).sum()))
+        k3.metric("Moderado",     int(exib["classificacao"].str.contains("MODERADO", na=False).sum()))
+        k4.metric("Alto Risco",   int(exib["classificacao"].str.contains("ALTO",     na=False).sum()))
 
         st.dataframe(exib, use_container_width=True, hide_index=True)
 
         st.download_button(
-            "BAIXAR HISTÓRICO (CSV)",
+            "BAIXAR HISTORICO (CSV)",
             exib.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"historico_urba_{datetime.now(TIMEZONE_BRASILIA).strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv", use_container_width=True,
+            file_name=f"historico_score_{datetime.now(TIMEZONE_BRASILIA).strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv",
+            use_container_width=True,
         )
 
     st.divider()
-    with st.expander("Excluir todo o histórico", expanded=False):
-        st.warning("Esta ação remove permanentemente todos os registros do banco de dados.")
-        confirmar = st.checkbox("Confirmo que desejo excluir TODO o histórico", key="conf_del_v16")
-        if st.button("EXCLUIR TODO O HISTÓRICO", type="primary", disabled=not confirmar, key="del_hist_v16"):
+    with st.expander("Excluir historico completo", expanded=False):
+        st.warning("Esta acao nao pode ser desfeita.")
+        confirmar = st.checkbox("Confirmo que desejo excluir TODO o historico", key="conf_del")
+        if st.button(
+            "EXCLUIR TODO O HISTORICO",
+            type="primary",
+            disabled=not confirmar,
+            key="del_hist",
+        ):
             try:
-                limpar_historico()
-                st.success("Histórico excluído com sucesso.")
+                db_execute("DELETE FROM historico_simulacoes")
+                st.success("Historico excluido.")
                 st.rerun()
             except Exception as e:
-                st.error(f"Erro ao excluir: {e}")
+                st.error(f"Erro: {e}")
 
 
 # ============================================================
-# PÁGINA: USUÁRIOS
+# PÁGINA: GESTÃO DE USUÁRIOS
 # ============================================================
-elif st.session_state.pagina == "Usuários" and eh_admin:
+elif st.session_state.pagina == "Usuarios" and is_admin:
 
-    st.markdown(f"<div style='font-size:1.1rem;font-weight:700;color:{VERDE_ESC};margin-bottom:16px;'>Gestão de Usuários</div>", unsafe_allow_html=True)
+    secao("Gestao de Usuarios")
 
-    with st.expander("Adicionar novo usuário", expanded=False):
-        u1, u2 = st.columns(2)
-        with u1:
-            novo_nome  = st.text_input("Nome completo", key="novo_nome_v16")
-            novo_email = st.text_input("E-mail",        key="novo_email_v16")
-        with u2:
-            novo_perfil = st.selectbox("Perfil", ["VENDEDOR", "ADMINISTRADOR"], key="novo_perfil_v16")
-            nova_senha  = st.text_input("Senha",  type="password", key="nova_senha_v16")
+    try:
+        rows = db_query("SELECT id, nome, email, perfil, ativo, criado_em FROM usuarios ORDER BY criado_em DESC")
+        df_users = pd.DataFrame(rows) if rows else pd.DataFrame()
+    except Exception as e:
+        st.error(f"Erro ao carregar usuarios: {e}")
+        df_users = pd.DataFrame()
 
-        if st.button("CRIAR USUÁRIO", type="primary", key="criar_usr_v16"):
+    if not df_users.empty:
+        st.dataframe(df_users, use_container_width=True, hide_index=True)
+    else:
+        st.info("Nenhum usuario cadastrado.")
+
+    st.divider()
+    secao("Adicionar Novo Usuario")
+
+    with st.form("form_novo_usuario", clear_on_submit=True):
+        n1, n2 = st.columns(2)
+        with n1:
+            novo_nome  = st.text_input("Nome completo *")
+            novo_email = st.text_input("E-mail *")
+        with n2:
+            novo_perfil = st.selectbox("Perfil *", ["VENDEDOR", "ADMINISTRADOR"])
+            nova_senha  = st.text_input("Senha *", type="password")
+
+        if st.form_submit_button("ADICIONAR USUARIO", type="primary"):
             if not all([novo_nome, novo_email, nova_senha]):
                 st.error("Preencha todos os campos.")
             else:
                 try:
-                    criar_usuario(novo_nome, novo_email, nova_senha, novo_perfil)
-                    st.success(f"Usuário {novo_nome} criado com sucesso.")
+                    db_execute(
+                        "INSERT INTO usuarios (nome, email, senha_hash, perfil) VALUES (%s,%s,%s,%s)",
+                        (novo_nome.strip(), novo_email.strip().lower(),
+                         hash_senha(nova_senha), novo_perfil),
+                    )
+                    st.success(f"Usuario {novo_nome} adicionado com sucesso!")
                     st.rerun()
+                except psycopg2.errors.UniqueViolation:
+                    st.error("E-mail ja cadastrado.")
                 except Exception as e:
-                    st.error(f"Erro ao criar usuário: {e}")
+                    st.error(f"Erro: {e}")
 
     st.divider()
-    try:
-        usuarios_lista = listar_usuarios()
-    except Exception as e:
-        st.error(f"Erro ao listar usuários: {e}")
-        usuarios_lista = []
+    secao("Alterar Senha de Usuario")
 
-    if not usuarios_lista:
-        st.info("Nenhum usuário cadastrado.")
-    else:
-        for u in usuarios_lista:
-            with st.container(border=True):
-                col_info, col_status, col_acao = st.columns([3, 1, 1])
-                with col_info:
-                    st.markdown(f"**{u['nome']}**")
-                    st.caption(f"{u['email']} • {u['perfil']}")
-                with col_status:
-                    status_cor  = VERDE   if u["ativo"] else "#999"
-                    status_txt  = "Ativo" if u["ativo"] else "Inativo"
-                    st.markdown(f"<span style='color:{status_cor};font-weight:700;'>{status_txt}</span>", unsafe_allow_html=True)
-                with col_acao:
-                    if u["email"] != usuario["email"]:
-                        label_toggle = "Desativar" if u["ativo"] else "Ativar"
-                        if st.button(label_toggle, key=f"toggle_{u['id']}", use_container_width=True):
-                            toggle_usuario(u["id"], not u["ativo"])
-                            st.rerun()
-                    else:
-                        st.caption("(você)")
+    with st.form("form_alterar_senha", clear_on_submit=True):
+        email_alt  = st.text_input("E-mail do usuario")
+        nova_senha_alt = st.text_input("Nova senha", type="password")
+        if st.form_submit_button("ALTERAR SENHA", type="primary"):
+            if not email_alt or not nova_senha_alt:
+                st.error("Preencha e-mail e nova senha.")
+            else:
+                try:
+                    db_execute(
+                        "UPDATE usuarios SET senha_hash=%s, atualizado_em=NOW() WHERE email=%s",
+                        (hash_senha(nova_senha_alt), email_alt.strip().lower()),
+                    )
+                    st.success("Senha alterada com sucesso!")
+                except Exception as e:
+                    st.error(f"Erro: {e}")
 
-# ── RODAPÉ ──
+    st.divider()
+    secao("Ativar / Desativar Usuario")
+
+    with st.form("form_toggle_usuario", clear_on_submit=True):
+        email_tog = st.text_input("E-mail do usuario")
+        acao_tog  = st.selectbox("Acao", ["Desativar", "Ativar"])
+        if st.form_submit_button("APLICAR", type="primary"):
+            if not email_tog:
+                st.error("Informe o e-mail.")
+            else:
+                ativo_novo = acao_tog == "Ativar"
+                try:
+                    db_execute(
+                        "UPDATE usuarios SET ativo=%s, atualizado_em=NOW() WHERE email=%s",
+                        (ativo_novo, email_tog.strip().lower()),
+                    )
+                    st.success(f"Usuario {email_tog} {'ativado' if ativo_novo else 'desativado'}.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro: {e}")
+
+
+# ============================================================
+# RODAPÉ
+# ============================================================
+st.divider()
 st.markdown(f"""
-<div style="text-align:center;padding:24px 0 8px;
-            color:{CINZA_MED};font-size:0.78rem;border-top:1px solid {CINZA_BORDA};
-            margin-top:32px;">
-  <strong style="color:{VERDE};">Urba</strong> • Simulador de Score de Vendas V16.3 •
-  Projeto Defensores do Contrato
+<div style="text-align:center; padding:12px 0; color:{URBA_MUTED}; font-size:0.78rem;">
+    <span style="color:{URBA_GREEN}; font-weight:700;">Urba</span>
+    &nbsp;·&nbsp; Simulador de Score de Vendas V16.4
+    &nbsp;·&nbsp; Projeto Defensores do Contrato
 </div>
 """, unsafe_allow_html=True)
