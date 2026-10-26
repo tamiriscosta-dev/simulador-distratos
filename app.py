@@ -1,4 +1,3 @@
-python
 # app.py — V16.1
 # Simulador de Score de Vendas — Projeto Defensores do Contrato
 # V16.1: Mantém toda lógica de negócio do V15.0 + autenticação e histórico via Neon (PostgreSQL)
