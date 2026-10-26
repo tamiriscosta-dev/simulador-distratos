@@ -1,7 +1,7 @@
-# app.py — V15.0
+python
+# app.py — V16.1
 # Simulador de Score de Vendas — Projeto Defensores do Contrato
-# V15.0: 5 variáveis, novos pesos, novas faixas, CPF extraído do SPC,
-#        sem Plano e sem Tipo de Produto.
+# V16.1: Mantém toda lógica de negócio do V15.0 + autenticação e histórico via Neon (PostgreSQL)
 
 import io
 import os
@@ -10,79 +10,109 @@ import unicodedata
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+import bcrypt
 import pandas as pd
-import streamlit as st
+import psycopg2
 import pdfplumber
+import streamlit as st
+from contextlib import contextmanager
 
-
+# ============================================================
+# CONFIGURAÇÃO DA PÁGINA
+# ============================================================
 st.set_page_config(
     page_title="Simulador de Score de Vendas",
     page_icon="🏠",
     layout="wide",
 )
 
+TIMEZONE_BRASILIA = ZoneInfo("America/Sao_Paulo")
 
 # ============================================================
-# IDENTIFICAÇÃO DO VENDEDOR E ADMINISTRAÇÃO
+# BANCO DE DADOS — NEON
 # ============================================================
-def email_valido(email):
-    email = str(email or "").strip().lower()
-    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email))
-
-
-def _lista_emails_secret(nome):
+@contextmanager
+def get_conn():
+    conn = psycopg2.connect(st.secrets["NEON_DATABASE_URL"])
     try:
-        bruto = st.secrets.get(nome, [])
+        yield conn
+        conn.commit()
     except Exception:
-        bruto = []
-    if isinstance(bruto, str):
-        itens = re.split(r"[,;\n]+", bruto)
-    else:
-        try:
-            itens = list(bruto)
-        except Exception:
-            itens = []
-    return {str(x).strip().lower() for x in itens if str(x).strip()}
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
-def obter_acessos_autorizados():
-    return (
-        _lista_emails_secret("VENDEDORES_AUTORIZADOS"),
-        _lista_emails_secret("ADMINISTRADORES_AUTORIZADOS"),
-    )
+def init_db():
+    """Garante que as tabelas existem (idempotente)."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id            SERIAL PRIMARY KEY,
+                email         TEXT UNIQUE NOT NULL,
+                nome          TEXT NOT NULL,
+                senha_hash    TEXT NOT NULL,
+                perfil        TEXT NOT NULL CHECK (perfil IN ('VENDEDOR','ADMINISTRADOR')),
+                ativo         BOOLEAN DEFAULT TRUE,
+                criado_em     TIMESTAMPTZ DEFAULT NOW(),
+                atualizado_em TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS historico_simulacoes (
+                id                         SERIAL PRIMARY KEY,
+                data_hora                  TIMESTAMPTZ DEFAULT NOW(),
+                vendedor_email             TEXT,
+                empreendimento             TEXT,
+                unidade                    TEXT,
+                cpf_proponente             TEXT,
+                idade                      INT,
+                faixa_etaria               TEXT,
+                estado_civil               TEXT,
+                score_proponente           TEXT,
+                renda_proponente           NUMERIC,
+                qtd_clientes_adicionais    INT,
+                renda_clientes_adicionais  NUMERIC,
+                renda_total                NUMERIC,
+                ato_urba                   NUMERIC,
+                percentual_ato             NUMERIC,
+                faixa_ato                  TEXT,
+                valor_proposta             NUMERIC,
+                primeira_mensal            NUMERIC,
+                percentual_comprometimento NUMERIC,
+                faixa_comprometimento      TEXT,
+                score_final                INT,
+                classificacao              TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_hist_vendedor  ON historico_simulacoes(vendedor_email);
+            CREATE INDEX IF NOT EXISTS idx_hist_data      ON historico_simulacoes(data_hora DESC);
+            CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);
+        """)
 
 
-def perfil_email(email):
-    email = str(email or "").strip().lower()
-    vendedores, administradores = obter_acessos_autorizados()
-    if email in administradores:
-        return "ADMINISTRADOR"
-    if email in vendedores:
-        return "VENDEDOR"
+# ============================================================
+# AUTENTICAÇÃO
+# ============================================================
+def verificar_login(email: str, senha: str):
+    """Retorna dict do usuário ou None."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, nome, email, senha_hash, perfil, ativo FROM usuarios WHERE email = %s",
+            (email.strip().lower(),)
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    id_, nome, email_db, senha_hash, perfil, ativo = row
+    if not ativo:
+        return None
+    if bcrypt.checkpw(senha.encode(), senha_hash.encode()):
+        return {"id": id_, "nome": nome, "email": email_db, "perfil": perfil}
     return None
 
 
-def obter_senha_admin():
-    try:
-        senha = str(st.secrets.get("DB_TOKEN", "")).strip()
-        if senha:
-            return senha
-    except Exception:
-        pass
-    try:
-        return str(st.secrets["admin"]["senha"]).strip()
-    except Exception:
-        return ""
-
-
-if "usuario_identificado_v14" not in st.session_state:
-    st.session_state.usuario_identificado_v14 = False
-if "vendedor_email_confirmado_v14" not in st.session_state:
-    st.session_state.vendedor_email_confirmado_v14 = ""
-if "admin_autenticado_v11" not in st.session_state:
-    st.session_state.admin_autenticado_v11 = False
-
-if not st.session_state.usuario_identificado_v14:
+def tela_login():
     st.markdown("""
     <style>
     .login-card {
@@ -111,81 +141,154 @@ if not st.session_state.usuario_identificado_v14:
         </div>
         """, unsafe_allow_html=True)
 
-        email_login = st.text_input(
-            "E-mail do vendedor *",
-            placeholder="nome@empresa.com.br",
-            key="email_login_v14",
-        ).strip().lower()
+        with st.form("form_login"):
+            email = st.text_input("E-mail", placeholder="nome@empresa.com.br")
+            senha = st.text_input("Senha", type="password")
+            entrar = st.form_submit_button("ENTRAR NO SIMULADOR", use_container_width=True)
 
-        entrar = st.button(
-            "ENTRAR NO SIMULADOR",
-            type="primary",
-            use_container_width=True,
-            key="entrar_simulador_v14",
-        )
         if entrar:
-            if not email_valido(email_login):
-                st.error("Informe um e-mail válido para continuar.")
+            if not email or not senha:
+                st.error("Preencha e-mail e senha.")
+                return
+            usuario = verificar_login(email, senha)
+            if usuario:
+                st.session_state["usuario"] = usuario
+                st.session_state["pagina_v11"] = "Simulador"
+                st.rerun()
             else:
-                vendedores_aut, administradores_aut = obter_acessos_autorizados()
-                if not vendedores_aut and not administradores_aut:
-                    st.error("A lista de usuários autorizados ainda não foi configurada nos Secrets.")
-                else:
-                    perfil = perfil_email(email_login)
-                    if perfil is None:
-                        st.error("E-mail não autorizado. Solicite o cadastro ao responsável pelo simulador.")
+                st.error("E-mail ou senha incorretos, ou usuário inativo.")
+
+
+# ============================================================
+# GESTÃO DE USUÁRIOS (só ADMINISTRADOR)
+# ============================================================
+def listar_usuarios():
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, nome, email, perfil, ativo, criado_em FROM usuarios ORDER BY criado_em DESC")
+        return cur.fetchall()
+
+
+def criar_usuario(nome, email, senha, perfil):
+    senha_hash = bcrypt.hashpw(senha.encode(), bcrypt.gensalt(12)).decode()
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO usuarios (nome, email, senha_hash, perfil) VALUES (%s, %s, %s, %s)",
+            (nome, email.strip().lower(), senha_hash, perfil)
+        )
+
+
+def alterar_status_usuario(user_id, ativo):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE usuarios SET ativo = %s, atualizado_em = NOW() WHERE id = %s",
+            (ativo, user_id)
+        )
+
+
+def redefinir_senha(user_id, nova_senha):
+    senha_hash = bcrypt.hashpw(nova_senha.encode(), bcrypt.gensalt(12)).decode()
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE usuarios SET senha_hash = %s, atualizado_em = NOW() WHERE id = %s",
+            (senha_hash, user_id)
+        )
+
+
+def excluir_usuario(user_id):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM usuarios WHERE id = %s", (user_id,))
+
+
+def pagina_gestao_usuarios():
+    st.divider()
+    st.subheader("👥 Gestão de Usuários")
+
+    with st.expander("➕ Criar novo usuário", expanded=False):
+        with st.form("form_novo_usuario"):
+            col1, col2 = st.columns(2)
+            with col1:
+                novo_nome   = st.text_input("Nome completo")
+                novo_email  = st.text_input("E-mail")
+            with col2:
+                novo_perfil = st.selectbox("Perfil", ["VENDEDOR", "ADMINISTRADOR"])
+                nova_senha  = st.text_input("Senha inicial", type="password")
+                conf_senha  = st.text_input("Confirmar senha", type="password")
+            criar = st.form_submit_button("Criar usuário", use_container_width=True)
+
+        if criar:
+            if not all([novo_nome, novo_email, nova_senha, conf_senha]):
+                st.error("Preencha todos os campos.")
+            elif nova_senha != conf_senha:
+                st.error("As senhas não coincidem.")
+            elif len(nova_senha) < 6:
+                st.error("A senha deve ter pelo menos 6 caracteres.")
+            else:
+                try:
+                    criar_usuario(novo_nome, novo_email, nova_senha, novo_perfil)
+                    st.success(f"Usuário **{novo_nome}** criado com sucesso!")
+                    st.rerun()
+                except Exception as e:
+                    if "unique" in str(e).lower():
+                        st.error("Já existe um usuário com esse e-mail.")
                     else:
-                        st.session_state.vendedor_email_confirmado_v14 = email_login
-                        st.session_state.usuario_identificado_v14 = True
-                        st.session_state.perfil_email_v13 = perfil
-                        st.session_state.admin_autenticado_v11 = False
-                        st.rerun()
-    st.stop()
-
-vendedor_email = st.session_state.vendedor_email_confirmado_v14
-
-with st.sidebar:
-    st.markdown("### 👤 Usuário")
-    st.caption("Vendedor identificado")
-    st.write(f"**{vendedor_email}**")
-
-    if st.button("Trocar usuário", key="trocar_usuario_v14", use_container_width=True):
-        st.session_state.usuario_identificado_v14 = False
-        st.session_state.vendedor_email_confirmado_v14 = ""
-        st.session_state.pop("perfil_email_v13", None)
-        st.session_state.admin_autenticado_v11 = False
-        st.session_state.pop("resultado", None)
-        st.rerun()
+                        st.error(f"Erro: {e}")
 
     st.divider()
-    perfil_atual = perfil_email(vendedor_email)
+    usuarios = listar_usuarios()
+    if not usuarios:
+        st.info("Nenhum usuário cadastrado.")
+        return
 
-    if perfil_atual == "ADMINISTRADOR":
-        st.markdown("### 🔐 Administração")
-        if not st.session_state.admin_autenticado_v11:
-            st.caption("E-mail administrativo reconhecido. Informe a senha para liberar o histórico.")
-            senha_digitada = st.text_input(
-                "Senha administrativa",
-                type="password",
-                key="senha_admin_v11",
-            )
-            if st.button("Entrar como administrador", key="login_admin_v11", use_container_width=True):
-                senha_correta = obter_senha_admin()
-                if not senha_correta:
-                    st.error("A senha administrativa ainda não foi configurada nos Secrets.")
-                elif senha_digitada == senha_correta:
-                    st.session_state.admin_autenticado_v11 = True
-                    st.rerun()
+    usuario_logado = st.session_state["usuario"]
+
+    for row in usuarios:
+        uid, nome, email, perfil, ativo, criado_em = row
+        status_icon = "🟢" if ativo else "🔴"
+        perfil_icon = "🛡️" if perfil == "ADMINISTRADOR" else "👤"
+
+        with st.expander(f"{status_icon} {perfil_icon} {nome} — {email}"):
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.write(f"**Perfil:** {perfil}")
+                st.write(f"**Status:** {'Ativo' if ativo else 'Inativo'}")
+                st.write(f"**Criado em:** {criado_em.strftime('%d/%m/%Y')}")
+
+            with col2:
+                if uid != usuario_logado["id"]:
+                    if ativo:
+                        if st.button("🔴 Desativar", key=f"des_{uid}"):
+                            alterar_status_usuario(uid, False)
+                            st.rerun()
+                    else:
+                        if st.button("🟢 Ativar", key=f"ati_{uid}"):
+                            alterar_status_usuario(uid, True)
+                            st.rerun()
+
+            with col3:
+                if uid != usuario_logado["id"]:
+                    if st.button("🗑️ Excluir", key=f"exc_{uid}"):
+                        excluir_usuario(uid)
+                        st.success("Usuário excluído.")
+                        st.rerun()
+
+            with st.form(f"form_senha_{uid}"):
+                nova = st.text_input("Nova senha", type="password", key=f"ns_{uid}")
+                conf = st.text_input("Confirmar",  type="password", key=f"cs_{uid}")
+                salvar = st.form_submit_button("🔑 Redefinir senha")
+            if salvar:
+                if nova != conf:
+                    st.error("Senhas não coincidem.")
+                elif len(nova) < 6:
+                    st.error("Mínimo 6 caracteres.")
                 else:
-                    st.error("Senha administrativa incorreta.")
-        else:
-            st.success("Perfil: ADMINISTRADOR")
-            if st.button("Sair da administração", key="logout_admin_v11", use_container_width=True):
-                st.session_state.admin_autenticado_v11 = False
-                st.session_state.pagina_v11 = "Simulador"
-                st.rerun()
-    else:
-        st.caption("Perfil: VENDEDOR")
+                    redefinir_senha(uid, nova)
+                    st.success("Senha redefinida com sucesso!")
 
 
 # ============================================================
@@ -281,6 +384,39 @@ div[data-testid="stMetricValue"] {
 </style>
 """, unsafe_allow_html=True)
 
+
+# ============================================================
+# INIT + TELA DE LOGIN
+# ============================================================
+init_db()
+
+if "usuario" not in st.session_state:
+    tela_login()
+    st.stop()
+
+usuario = st.session_state["usuario"]
+vendedor_email = usuario["email"]
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+with st.sidebar:
+    st.markdown("### 👤 Usuário")
+    st.write(f"**{usuario['nome']}**")
+    st.caption(vendedor_email)
+    st.caption(f"Perfil: **{usuario['perfil']}**")
+
+    if st.button("Trocar usuário", key="trocar_usuario_v16", use_container_width=True):
+        for k in ["usuario", "pagina_v11", "resultado"]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
+    st.divider()
+
+
+# ============================================================
+# CABEÇALHO E NAVEGAÇÃO
+# ============================================================
 st.markdown("""
 <div class="v9-hero">
   <div class="v9-kicker">Projeto Defensores do Contrato</div>
@@ -292,42 +428,50 @@ st.markdown("""
 if "pagina_v11" not in st.session_state:
     st.session_state.pagina_v11 = "Simulador"
 
-nav1, nav2, nav3 = st.columns([1, 1, 4])
-with nav1:
+is_admin = usuario["perfil"] == "ADMINISTRADOR"
+
+nav_cols = st.columns([1, 1, 1, 4]) if is_admin else st.columns([1, 4])
+
+with nav_cols[0]:
     if st.button(
         "▣  Simulador",
         type="primary" if st.session_state.pagina_v11 == "Simulador" else "secondary",
         use_container_width=True,
-        key="nav_simulador_v11",
+        key="nav_simulador_v16",
     ):
         st.session_state.pagina_v11 = "Simulador"
         st.rerun()
-with nav2:
-    if st.session_state.admin_autenticado_v11:
+
+with nav_cols[1]:
+    if is_admin:
         if st.button(
             "▣  Histórico",
             type="primary" if st.session_state.pagina_v11 == "Histórico" else "secondary",
             use_container_width=True,
-            key="nav_historico_v11",
+            key="nav_historico_v16",
         ):
             st.session_state.pagina_v11 = "Histórico"
             st.rerun()
     else:
-        st.button("🔒  Histórico", use_container_width=True, disabled=True, key="nav_hist_bloq_v11")
-with nav3:
-    if st.session_state.admin_autenticado_v11:
-        st.caption("🔐 Área Administrativa ativa • Histórico liberado")
-    else:
-        st.caption("Simulação atual • vendedor identificado")
+        st.button("🔒  Histórico", use_container_width=True, disabled=True, key="nav_hist_bloq_v16")
+
+if is_admin:
+    with nav_cols[2]:
+        if st.button(
+            "▣  Usuários",
+            type="primary" if st.session_state.pagina_v11 == "Usuários" else "secondary",
+            use_container_width=True,
+            key="nav_usuarios_v16",
+        ):
+            st.session_state.pagina_v11 = "Usuários"
+            st.rerun()
+
 st.divider()
 
 
 # ============================================================
 # CADASTRO DE EMPREENDIMENTOS E UNIDADES
 # ============================================================
-TIMEZONE_BRASILIA = ZoneInfo("America/Sao_Paulo")
-
-
 def _chave_coluna(nome):
     nome = str(nome or "").strip()
     nome = unicodedata.normalize("NFKD", nome)
@@ -388,8 +532,8 @@ cadastro, arquivo_cadastro, aba_cadastro, erro_cadastro = carregar_cadastro()
 
 
 # ============================================================
-# PARÂMETROS DO SCORE — V15.0
-# 5 variáveis | Score máximo: 78 | Mínimo: 16
+# PARÂMETROS DO SCORE — V15.0 (mantidos integralmente)
+# Score máximo: 78 | Mínimo: 16
 # ============================================================
 PESOS = {
     "score_credito":         5,
@@ -419,7 +563,7 @@ NOTAS_COMPROMETIMENTO = {
 }
 
 NOTAS_IDADE = {
-    "60+ ANOS":    5,
+    "60+ ANOS":     5,
     "45 A 60 ANOS": 4,
     "35 A 45 ANOS": 3,
     "ATÉ 25 ANOS":  2,
@@ -432,17 +576,15 @@ NOTAS_ESTADO_CIVIL = {
     "SOLTEIRO(A)":   1,
 }
 
-# Score máximo teórico = 78
-SCORE_MAX = sum([
+SCORE_MAX       = sum([
     5 * PESOS["score_credito"],
     5 * PESOS["ato"],
     5 * PESOS["comprometimento_renda"],
     5 * PESOS["idade"],
     3 * PESOS["estado_civil"],
 ])
-
-LIMITE_BAIXO     = 54
-LIMITE_MODERADO  = 33
+LIMITE_BAIXO    = 54
+LIMITE_MODERADO = 33
 
 
 # ============================================================
@@ -464,17 +606,43 @@ def normalizar(texto):
 
 def moeda_para_float(valor):
     if valor is None:
-        return None
-    s = str(valor).strip()
-    s = re.sub(r"[^\d,.\-]", "", s)
-    if not s:
-        return None
-    if "," in s:
-        s = s.replace(".", "").replace(",", ".")
+        return 0.0
+    texto = str(valor or "").strip().replace("R$", "").replace(" ", "")
+    if not texto:
+        return 0.0
+    if "," in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+    else:
+        if texto.count(".") > 1:
+            texto = texto.replace(".", "")
     try:
-        return float(s)
-    except ValueError:
-        return None
+        return max(0.0, float(texto))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def float_para_moeda_input(valor):
+    return f"{float(valor or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _normalizar_campo_moeda(chave):
+    st.session_state[chave] = float_para_moeda_input(
+        moeda_para_float(st.session_state.get(chave, "0,00"))
+    )
+
+
+def campo_moeda(label, chave, valor_inicial=0.0, ajuda=None):
+    if chave not in st.session_state:
+        st.session_state[chave] = float_para_moeda_input(valor_inicial)
+    texto = st.text_input(
+        label,
+        key=chave,
+        on_change=_normalizar_campo_moeda,
+        args=(chave,),
+        help=ajuda,
+        placeholder="0,00",
+    )
+    return moeda_para_float(texto)
 
 
 def calcular_idade(nascimento):
@@ -546,12 +714,11 @@ def mapear_score(letra):
 
 
 def formatar_cpf(digitos):
-    """Recebe 11 dígitos e retorna 000.000.000-00."""
     return f"{digitos[:3]}.{digitos[3:6]}.{digitos[6:9]}-{digitos[9:]}"
 
 
 # ============================================================
-# EXTRAÇÃO DO SPC
+# EXTRAÇÃO DO SPC (mantida integralmente do V15.0)
 # ============================================================
 def extrair_dados_spc(pdf_file):
     pdf_file.seek(0)
@@ -631,14 +798,9 @@ def extrair_dados_spc(pdf_file):
                 data_nascimento = None
 
     # --- CPF ---
-    # O SPC AVANÇADO MRV exibe o CPF no formato 000.000.000-00 logo abaixo
-    # do nome do proponente, precedido pelo rótulo "CPF:".
-    # Também captura variações sem rótulo explícito (11 dígitos agrupados).
     cpf = None
     padroes_cpf = [
-        # Com rótulo "CPF:" — cobre formatos 000.000.000-00 e 000.000.000/00
         r"\bCPF\s*[:\-]?\s*(\d{3}[\.\-]?\d{3}[\.\-]?\d{3}[\.\-\/]?\d{2})\b",
-        # Formato puro sem rótulo: 000.000.000-00
         r"\b(\d{3}\.\d{3}\.\d{3}[-\/]\d{2})\b",
     ]
     for padrao in padroes_cpf:
@@ -670,21 +832,21 @@ def extrair_dados_spc(pdf_file):
         consultas_90d = int(m90.group(1))
 
     return {
-        "score_letra":           score_letra,
-        "score_faixa":           score_faixa,
-        "renda_presumida":       renda,
-        "data_nascimento":       data_nascimento,
-        "cpf":                   cpf,
-        "taxa_inadimplencia":    taxa_inadimplencia,
+        "score_letra":            score_letra,
+        "score_faixa":            score_faixa,
+        "renda_presumida":        renda,
+        "data_nascimento":        data_nascimento,
+        "cpf":                    cpf,
+        "taxa_inadimplencia":     taxa_inadimplencia,
         "renda_comprometida_spc": renda_comprometida_spc,
-        "consultas_30d":         consultas_30d,
-        "consultas_90d":         consultas_90d,
-        "texto_extraido":        texto_completo,
+        "consultas_30d":          consultas_30d,
+        "consultas_90d":          consultas_90d,
+        "texto_extraido":         texto_completo,
     }
 
 
 # ============================================================
-# FUNÇÕES DE CÁLCULO DE CENÁRIOS
+# CENÁRIOS / ESTRATÉGIAS (mantidos integralmente do V15.0)
 # ============================================================
 def renda_minima_para_comprometimento(mensal, limite_pct):
     if mensal <= 0 or limite_pct <= 0:
@@ -703,7 +865,6 @@ def ato_minimo_para_percentual(valor_proposta, pct):
 def montar_cenarios(score_atual, notas, renda_total, mensal, ato, valor_proposta):
     cenarios = []
 
-    # ATO
     metas_ato = [
         (1.00, "1% A 2%"),
         (2.00, "2% A 3%"),
@@ -724,7 +885,6 @@ def montar_cenarios(score_atual, notas, renda_total, mensal, ato, valor_proposta
                 "NovoScore": score_atual + ganho,
             })
 
-    # COMPROMETIMENTO
     metas_comp = [
         (50, "30% A 50%"),
         (30, "20% A 30%"),
@@ -735,7 +895,7 @@ def montar_cenarios(score_atual, notas, renda_total, mensal, ato, valor_proposta
         nova_nota = NOTAS_COMPROMETIMENTO[faixa_meta]
         ganho = (nova_nota - notas["comprometimento_renda"]) * PESOS["comprometimento_renda"]
         if ganho > 0:
-            renda_alvo = renda_minima_para_comprometimento(mensal, limite)
+            renda_alvo  = renda_minima_para_comprometimento(mensal, limite)
             mensal_alvo = mensal_maxima_para_comprometimento(renda_total, limite)
             cenarios.append({
                 "Variável": "Renda / Mensal",
@@ -749,8 +909,8 @@ def montar_cenarios(score_atual, notas, renda_total, mensal, ato, valor_proposta
 
     for c in cenarios:
         c["NovaClassificacao"] = classificar(c["NovoScore"])[0]
-        c["AtingeModerado"] = c["NovoScore"] >= LIMITE_MODERADO
-        c["AtingeBaixo"] = c["NovoScore"] >= LIMITE_BAIXO
+        c["AtingeModerado"]    = c["NovoScore"] >= LIMITE_MODERADO
+        c["AtingeBaixo"]       = c["NovoScore"] >= LIMITE_BAIXO
 
     return sorted(
         cenarios,
@@ -758,17 +918,43 @@ def montar_cenarios(score_atual, notas, renda_total, mensal, ato, valor_proposta
     )
 
 
-def obter_usuario_autenticado():
-    try:
-        info = st.user.to_dict()
-    except Exception:
-        info = {}
-    email = str(info.get("email") or info.get("preferred_username") or "").strip().lower()
-    nome = str(info.get("name") or info.get("given_name") or "").strip()
-    return {"email": email, "nome": nome, "identificado": bool(email)}
+# ============================================================
+# HISTÓRICO — NEON
+# ============================================================
+def salvar_simulacao(dados: dict):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO historico_simulacoes (
+                vendedor_email, empreendimento, unidade, cpf_proponente,
+                idade, faixa_etaria, estado_civil, score_proponente,
+                renda_proponente, qtd_clientes_adicionais, renda_clientes_adicionais,
+                renda_total, ato_urba, percentual_ato, faixa_ato,
+                valor_proposta, primeira_mensal, percentual_comprometimento,
+                faixa_comprometimento, score_final, classificacao
+            ) VALUES (
+                %(vendedor_email)s, %(empreendimento)s, %(unidade)s, %(cpf_proponente)s,
+                %(idade)s, %(faixa_etaria)s, %(estado_civil)s, %(score_proponente)s,
+                %(renda_proponente)s, %(qtd_clientes_adicionais)s, %(renda_clientes_adicionais)s,
+                %(renda_total)s, %(ato_urba)s, %(percentual_ato)s, %(faixa_ato)s,
+                %(valor_proposta)s, %(primeira_mensal)s, %(percentual_comprometimento)s,
+                %(faixa_comprometimento)s, %(score_final)s, %(classificacao)s
+            )
+        """, dados)
 
 
-usuario_atual = obter_usuario_autenticado()
+def carregar_historico(filtro_vendedor=None, filtro_emp=None, filtro_class=None):
+    query  = "SELECT * FROM historico_simulacoes WHERE 1=1"
+    params = []
+    if filtro_vendedor:
+        query += " AND vendedor_email = %s"; params.append(filtro_vendedor)
+    if filtro_emp:
+        query += " AND empreendimento = %s"; params.append(filtro_emp)
+    if filtro_class:
+        query += " AND classificacao ILIKE %s"; params.append(f"%{filtro_class}%")
+    query += " ORDER BY data_hora DESC"
+    with get_conn() as conn:
+        return pd.read_sql(query, conn, params=params if params else None)
 
 
 # ============================================================
@@ -776,48 +962,6 @@ usuario_atual = obter_usuario_autenticado()
 # ============================================================
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
-
-
-# ============================================================
-# FORMATAÇÃO MONETÁRIA
-# ============================================================
-def moeda_para_float(valor):
-    texto = str(valor or "").strip().replace("R$", "").replace(" ", "")
-    if not texto:
-        return 0.0
-    if "," in texto:
-        texto = texto.replace(".", "").replace(",", ".")
-    else:
-        if texto.count(".") > 1:
-            texto = texto.replace(".", "")
-    try:
-        return max(0.0, float(texto))
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def float_para_moeda_input(valor):
-    return f"{float(valor or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-
-def _normalizar_campo_moeda(chave):
-    st.session_state[chave] = float_para_moeda_input(
-        moeda_para_float(st.session_state.get(chave, "0,00"))
-    )
-
-
-def campo_moeda(label, chave, valor_inicial=0.0, ajuda=None):
-    if chave not in st.session_state:
-        st.session_state[chave] = float_para_moeda_input(valor_inicial)
-    texto = st.text_input(
-        label,
-        key=chave,
-        on_change=_normalizar_campo_moeda,
-        args=(chave,),
-        help=ajuda,
-        placeholder="0,00",
-    )
-    return moeda_para_float(texto)
 
 
 # ============================================================
@@ -872,7 +1016,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
             if not valor:
                 return "Selecione a unidade"
             texto = str(valor).strip()
-            emp = str(empreendimento or "").strip()
+            emp   = str(empreendimento or "").strip()
             if emp and texto.upper().startswith(emp.upper()):
                 curto = texto[len(emp):].lstrip(" -–—")
                 if curto:
@@ -902,13 +1046,13 @@ if st.session_state.get("pagina_v11") == "Simulador":
             key="pdf_prop_v14",
         )
 
-        dados_spc_prop = None
-        score_proponente = None
-        renda_proponente = 0.0
-        nascimento = None
-        idade = None
-        faixa_idade = None
-        cpf_proponente = ""
+        dados_spc_prop    = None
+        score_proponente  = None
+        renda_proponente  = 0.0
+        nascimento        = None
+        idade             = None
+        faixa_idade       = None
+        cpf_proponente    = ""
 
         if pdf_prop:
             try:
@@ -917,15 +1061,13 @@ if st.session_state.get("pagina_v11") == "Simulador":
 
                 score_proponente = dados_spc_prop.get("score_faixa")
                 renda_proponente = float(dados_spc_prop.get("renda_presumida") or 0)
-                nascimento = dados_spc_prop.get("data_nascimento")
-                idade = calcular_idade(nascimento) if nascimento else None
-                faixa_idade = faixa_etaria(idade) if idade is not None else None
-                cpf_proponente = dados_spc_prop.get("cpf") or ""
+                nascimento       = dados_spc_prop.get("data_nascimento")
+                idade            = calcular_idade(nascimento) if nascimento else None
+                faixa_idade      = faixa_etaria(idade) if idade is not None else None
+                cpf_proponente   = dados_spc_prop.get("cpf") or ""
 
                 st.markdown("##### Dados identificados no SPC")
                 with st.container(border=True):
-
-                    # CPF — exibido primeiro conforme layout do SPC AVANÇADO MRV
                     st.caption("CPF do Proponente")
                     if cpf_proponente:
                         st.markdown(f"**{cpf_proponente}**")
@@ -954,7 +1096,6 @@ if st.session_state.get("pagina_v11") == "Simulador":
             except Exception as e:
                 st.error(f"Falha na leitura do SPC: {e}")
 
-        # Preenchimento manual como contingência
         if pdf_prop and not cpf_proponente:
             cpf_proponente = st.text_input(
                 "CPF — preenchimento manual",
@@ -985,16 +1126,9 @@ if st.session_state.get("pagina_v11") == "Simulador":
     # ---------------------- PROPOSTA ----------------------
     with bloco_proposta:
         st.markdown("### 📄 Dados da Proposta")
-
-        ato_urba = campo_moeda("Ato Urba (R$) *", "ato_urba_v14")
-        valor_proposta = campo_moeda(
-            "Valor da Proposta / Líquido CV (R$) *",
-            "valor_proposta_v14",
-        )
-        primeira_mensal = campo_moeda(
-            "Valor da 1ª Mensal (R$) *",
-            "primeira_mensal_v14",
-        )
+        ato_urba        = campo_moeda("Ato Urba (R$) *",                        "ato_urba_v14")
+        valor_proposta  = campo_moeda("Valor da Proposta / Líquido CV (R$) *",  "valor_proposta_v14")
+        primeira_mensal = campo_moeda("Valor da 1ª Mensal (R$) *",              "primeira_mensal_v14")
 
     # ---------------------- COMPOSIÇÃO DE RENDA ----------------------
     with bloco_renda:
@@ -1003,10 +1137,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
 
         qtd_adicionais = st.number_input(
             "Clientes adicionais",
-            min_value=0,
-            max_value=4,
-            value=0,
-            step=1,
+            min_value=0, max_value=4, value=0, step=1,
             key="qtd_adicionais_v14",
         )
 
@@ -1014,7 +1145,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
         for i in range(int(qtd_adicionais)):
             numero = i + 2
             with st.expander(f"Cliente {numero}", expanded=True):
-                pdf_add = st.file_uploader(
+                pdf_add  = st.file_uploader(
                     f"SPC — Cliente {numero}",
                     type=["pdf"],
                     key=f"pdf_cliente_v14_{numero}",
@@ -1023,7 +1154,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
 
                 if pdf_add:
                     try:
-                        d_add = extrair_dados_spc(pdf_add)
+                        d_add    = extrair_dados_spc(pdf_add)
                         renda_add = float(d_add["renda_presumida"] or 0)
                         if renda_add:
                             st.success(f"Renda: {brl(renda_add)}")
@@ -1042,7 +1173,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
 
     # ---------------------- CÁLCULOS INSTANTÂNEOS ----------------------
     score_analise = score_proponente
-    renda_total = renda_proponente + sum(rendas_adicionais)
+    renda_total   = renda_proponente + sum(rendas_adicionais)
 
     perc_ato  = ato_urba / valor_proposta * 100 if valor_proposta > 0 else 0
     perc_comp = primeira_mensal / renda_total * 100 if renda_total > 0 else 0
@@ -1053,10 +1184,10 @@ if st.session_state.get("pagina_v11") == "Simulador":
     st.divider()
 
     i1, i2, i3, i4 = st.columns(4)
-    i1.metric("% do Ato",         f"{perc_ato:.2f}%",  faixa_at)
-    i2.metric("Comprometimento",   f"{perc_comp:.2f}%", faixa_comp)
-    i3.metric("Renda Total",       brl(renda_total))
-    i4.metric("Faixa Etária",      faixa_idade or "—")
+    i1.metric("% do Ato",       f"{perc_ato:.2f}%",  faixa_at)
+    i2.metric("Comprometimento", f"{perc_comp:.2f}%", faixa_comp)
+    i3.metric("Renda Total",     brl(renda_total))
+    i4.metric("Faixa Etária",    faixa_idade or "—")
 
     # ---------------------- VALIDAÇÃO ----------------------
     faltando = []
@@ -1091,7 +1222,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
             "idade":                 NOTAS_IDADE[faixa_idade],
             "estado_civil":          NOTAS_ESTADO_CIVIL[estado_civil],
         }
-        score_final = calcular_score_total(notas)
+        score_final    = calcular_score_total(notas)
         classificacao, cor = classificar(score_final)
 
         st.session_state.resultado = {
@@ -1141,18 +1272,18 @@ if st.session_state.get("pagina_v11") == "Simulador":
         q1, q2, q3, q4 = st.columns(4)
         resumo_card(q1, "Empreendimento", d.get("empreendimento"))
         unidade_resumo = d.get("unidade") or ""
-        emp_resumo = d.get("empreendimento") or ""
+        emp_resumo     = d.get("empreendimento") or ""
         if emp_resumo and unidade_resumo.upper().startswith(emp_resumo.upper()):
             unidade_resumo = unidade_resumo[len(emp_resumo):].lstrip(" -–—") or unidade_resumo
-        resumo_card(q2, "Unidade", unidade_resumo)
+        resumo_card(q2, "Unidade",           unidade_resumo)
         resumo_card(q3, "CPF do Proponente", d.get("cpf_proponente"))
-        resumo_card(q4, "Renda Total", brl(d.get("renda_total", 0)))
+        resumo_card(q4, "Renda Total",       brl(d.get("renda_total", 0)))
 
         p1, p2, p3, p4 = st.columns(4)
-        resumo_card(p1, "Faixa Etária",        d.get("faixa_idade"))
-        resumo_card(p2, "Estado Civil",         d.get("estado_civil"))
-        resumo_card(p3, "Score do Proponente",  d.get("score_proponente"))
-        resumo_card(p4, "Ato Urba",             brl(d.get("ato_urba", 0)))
+        resumo_card(p1, "Faixa Etária",       d.get("faixa_idade"))
+        resumo_card(p2, "Estado Civil",        d.get("estado_civil"))
+        resumo_card(p3, "Score do Proponente", d.get("score_proponente"))
+        resumo_card(p4, "Ato Urba",            brl(d.get("ato_urba", 0)))
 
         c1, c2, c3, c4 = st.columns(4)
         resumo_card(c1, "% do Ato",         f"{d.get('perc_ato', 0):.2f}%")
@@ -1216,7 +1347,7 @@ if st.session_state.get("pagina_v11") == "Simulador":
             st.divider()
             st.subheader("💡 Estratégias de Estruturação da Venda")
 
-            falta_mod  = max(0, LIMITE_MODERADO - d["score_final"])
+            falta_mod   = max(0, LIMITE_MODERADO - d["score_final"])
             falta_baixo = max(0, LIMITE_BAIXO    - d["score_final"])
 
             a1, b1 = st.columns(2)
@@ -1239,19 +1370,18 @@ if st.session_state.get("pagina_v11") == "Simulador":
                 df_exibicao = df_cenarios[
                     ["Variável", "Ajuste", "Ganho", "NovoScore", "NovaClassificacao"]
                 ].head(12).rename(columns={
-                    "NovoScore":        "Novo Score",
+                    "NovoScore":         "Novo Score",
                     "NovaClassificacao": "Nova Classificação",
                 })
-
                 st.dataframe(
                     df_exibicao,
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "Variável":          st.column_config.TextColumn("Variável",          width="medium"),
-                        "Ajuste":            st.column_config.TextColumn("Ajuste",            width="large"),
-                        "Ganho":             st.column_config.TextColumn("Ganho",             width="small"),
-                        "Novo Score":        st.column_config.TextColumn("Novo Score",        width="small"),
+                        "Variável":           st.column_config.TextColumn("Variável",           width="medium"),
+                        "Ajuste":             st.column_config.TextColumn("Ajuste",             width="large"),
+                        "Ganho":              st.column_config.TextColumn("Ganho",              width="small"),
+                        "Novo Score":         st.column_config.TextColumn("Novo Score",         width="small"),
                         "Nova Classificação": st.column_config.TextColumn("Nova Classificação", width="medium"),
                     },
                 )
@@ -1260,12 +1390,9 @@ if st.session_state.get("pagina_v11") == "Simulador":
                     "alterações de idade, estado civil ou score cadastral do cliente."
                 )
 
-    # ============================================================
-    # HISTÓRICO — SALVAR
-    # ============================================================
-    if st.session_state.get("resultado"):
-        d = st.session_state["resultado"]
-
+        # ============================================================
+        # SALVAR NO HISTÓRICO — NEON
+        # ============================================================
         st.divider()
         st.subheader("💾 Histórico")
         st.caption(
@@ -1273,161 +1400,121 @@ if st.session_state.get("pagina_v11") == "Simulador":
             "o histórico consolidado."
         )
 
-        if not email_valido(vendedor_email):
-            st.warning("Informe um e-mail válido do vendedor para salvar.")
-        elif st.button(
+        if st.button(
             "✅ CONFIRMAR E SALVAR NO HISTÓRICO",
             type="primary",
-            key="salvar_historico_v8",
+            key="salvar_historico_v16",
         ):
-            registro = {
-                "Data_Hora":                  datetime.now(TIMEZONE_BRASILIA).strftime("%d/%m/%Y %H:%M:%S"),
-                "Vendedor_Email":             vendedor_email,
-                "Empreendimento":             d.get("empreendimento", ""),
-                "Unidade":                    d.get("unidade", ""),
-                "CPF_Proponente":             d.get("cpf_proponente", ""),
-                "Idade":                      d.get("idade", ""),
-                "Faixa_Etaria":               d.get("faixa_idade", ""),
-                "Estado_Civil":               d.get("estado_civil", ""),
-                "Score_Proponente":           d.get("score_proponente", ""),
-                "Renda_Proponente":           d.get("renda_proponente", 0),
-                "Qtd_Clientes_Adicionais":    d.get("qtd_clientes_adicionais", 0),
-                "Renda_Clientes_Adicionais":  d.get("renda_adicionais", 0),
-                "Renda_Total":                d.get("renda_total", 0),
-                "Ato_Urba":                   d.get("ato_urba", 0),
-                "Percentual_Ato":             d.get("perc_ato", 0),
-                "Faixa_Ato":                  d.get("faixa_at", ""),
-                "Valor_Proposta":             d.get("valor_proposta", 0),
-                "Primeira_Mensal":            d.get("primeira_mensal", 0),
-                "Percentual_Comprometimento": d.get("perc_comp", 0),
-                "Faixa_Comprometimento":      d.get("faixa_comp", ""),
-                "Score_Final":                d.get("score_final", 0),
-                "Classificacao":              d.get("classificacao", ""),
+            dados_salvar = {
+                "vendedor_email":             vendedor_email,
+                "empreendimento":             d.get("empreendimento", ""),
+                "unidade":                    d.get("unidade", ""),
+                "cpf_proponente":             d.get("cpf_proponente", ""),
+                "idade":                      d.get("idade"),
+                "faixa_etaria":               d.get("faixa_idade", ""),
+                "estado_civil":               d.get("estado_civil", ""),
+                "score_proponente":           d.get("score_proponente", ""),
+                "renda_proponente":           d.get("renda_proponente", 0),
+                "qtd_clientes_adicionais":    d.get("qtd_clientes_adicionais", 0),
+                "renda_clientes_adicionais":  d.get("renda_adicionais", 0),
+                "renda_total":                d.get("renda_total", 0),
+                "ato_urba":                   d.get("ato_urba", 0),
+                "percentual_ato":             d.get("perc_ato", 0),
+                "faixa_ato":                  d.get("faixa_at", ""),
+                "valor_proposta":             d.get("valor_proposta", 0),
+                "primeira_mensal":            d.get("primeira_mensal", 0),
+                "percentual_comprometimento": d.get("perc_comp", 0),
+                "faixa_comprometimento":      d.get("faixa_comp", ""),
+                "score_final":                d.get("score_final", 0),
+                "classificacao":              d.get("classificacao", ""),
             }
-
-            arquivo = "historico.csv"
-            novo = pd.DataFrame([registro])
-
-            if os.path.exists(arquivo):
-                try:
-                    antigo = pd.read_csv(arquivo)
-                    todas_colunas = list(dict.fromkeys(list(novo.columns) + list(antigo.columns)))
-                    novo = pd.concat(
-                        [
-                            antigo.reindex(columns=todas_colunas),
-                            novo.reindex(columns=todas_colunas),
-                        ],
-                        ignore_index=True,
-                    )
-                except Exception:
-                    pass
-
-            novo.to_csv(arquivo, index=False, encoding="utf-8-sig")
-            st.success("Simulação salva no histórico.")
+            try:
+                salvar_simulacao(dados_salvar)
+                st.success("✅ Simulação salva no histórico.")
+            except Exception as e:
+                st.error(f"Erro ao salvar: {e}")
 
 
 # ============================================================
 # PÁGINA: HISTÓRICO ADMINISTRATIVO
 # ============================================================
-if st.session_state.admin_autenticado_v11 and st.session_state.get("pagina_v11") == "Histórico":
+if st.session_state.get("pagina_v11") == "Histórico" and is_admin:
 
     st.divider()
     st.subheader("📂 Histórico de Simulações")
 
     with st.expander("🗑️ Excluir histórico", expanded=False):
         st.warning(
-            "Esta ação exclui todo o histórico armazenado nesta instância "
-            "do Streamlit e não pode ser desfeita."
+            "Esta ação exclui todo o histórico armazenado no banco de dados "
+            "e não pode ser desfeita."
         )
         confirmar_exclusao = st.checkbox(
             "Confirmo que desejo excluir TODO o histórico",
-            key="confirmar_exclusao_historico_v8",
+            key="confirmar_exclusao_historico_v16",
         )
         if st.button(
             "🗑️ EXCLUIR TODO O HISTÓRICO",
             type="primary",
             disabled=not confirmar_exclusao,
-            key="excluir_historico_v8",
+            key="excluir_historico_v16",
         ):
-            if os.path.exists("historico.csv"):
-                os.remove("historico.csv")
+            with get_conn() as conn:
+                conn.cursor().execute("DELETE FROM historico_simulacoes")
             st.session_state.pop("resultado", None)
-            st.success("Histórico excluído. O próximo registro iniciará um novo arquivo.")
+            st.success("Histórico excluído.")
             st.rerun()
 
-    if not os.path.exists("historico.csv"):
+    df_hist = carregar_historico()
+
+    if df_hist.empty:
         st.info("Nenhuma simulação oficial registrada.")
     else:
-        try:
-            hist = pd.read_csv("historico.csv")
-        except Exception as erro:
-            hist = pd.DataFrame()
-            st.error(f"Não foi possível ler o histórico: {erro}")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            vendedores = sorted(x for x in df_hist["vendedor_email"].fillna("").astype(str).unique() if x)
+            filtro_vendedor = st.selectbox("Vendedor", ["TODOS"] + vendedores, key="filtro_vendedor_v16")
+        with c2:
+            emps_hist = sorted(x for x in df_hist["empreendimento"].fillna("").astype(str).unique() if x)
+            filtro_emp = st.selectbox("Empreendimento", ["TODOS"] + emps_hist, key="filtro_emp_v16")
+        with c3:
+            classes = sorted(x for x in df_hist["classificacao"].fillna("").astype(str).unique() if x)
+            filtro_class = st.selectbox("Classificação", ["TODAS"] + classes, key="filtro_class_v16")
 
-        if hist.empty:
-            st.info("Nenhuma simulação oficial registrada.")
-        else:
-            if "Vendedor_Email" not in hist.columns:
-                hist["Vendedor_Email"] = ""
-            if "Empreendimento" not in hist.columns:
-                hist["Empreendimento"] = ""
-            if "Classificacao" not in hist.columns:
-                if "Classificação" in hist.columns:
-                    hist["Classificacao"] = hist["Classificação"]
-                else:
-                    hist["Classificacao"] = ""
-            if "CPF_Proponente" not in hist.columns:
-                hist["CPF_Proponente"] = ""
+        df_filtrado = carregar_historico(
+            filtro_vendedor if filtro_vendedor != "TODOS" else None,
+            filtro_emp      if filtro_emp      != "TODOS" else None,
+            filtro_class    if filtro_class    != "TODAS" else None,
+        )
 
-            st.success("Visão administrativa — histórico consolidado")
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Simulações",  len(df_filtrado))
+        k2.metric("Baixo Risco", int(df_filtrado["classificacao"].astype(str).str.contains("BAIXO",    na=False).sum()))
+        k3.metric("Moderado",    int(df_filtrado["classificacao"].astype(str).str.contains("MODERADO", na=False).sum()))
+        k4.metric("Alto Risco",  int(df_filtrado["classificacao"].astype(str).str.contains("ALTO",     na=False).sum()))
 
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                vendedores = sorted(
-                    x for x in hist["Vendedor_Email"].fillna("").astype(str).unique().tolist() if x
-                )
-                filtro_vendedor = st.selectbox("Vendedor", ["TODOS"] + vendedores, key="filtro_vendedor_v11")
-            with c2:
-                empreendimentos_hist = sorted(
-                    x for x in hist["Empreendimento"].fillna("").astype(str).unique().tolist() if x
-                )
-                filtro_emp = st.selectbox("Empreendimento", ["TODOS"] + empreendimentos_hist, key="filtro_emp_v11")
-            with c3:
-                classes = sorted(
-                    x for x in hist["Classificacao"].fillna("").astype(str).unique().tolist() if x
-                )
-                filtro_class = st.selectbox("Classificação", ["TODAS"] + classes, key="filtro_class_v11")
+        st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
 
-            exibicao = hist.copy()
-            if filtro_vendedor != "TODOS":
-                exibicao = exibicao[exibicao["Vendedor_Email"].astype(str) == filtro_vendedor]
-            if filtro_emp != "TODOS":
-                exibicao = exibicao[exibicao["Empreendimento"].astype(str) == filtro_emp]
-            if filtro_class != "TODAS":
-                exibicao = exibicao[exibicao["Classificacao"].astype(str) == filtro_class]
-
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Simulações", len(exibicao))
-            k2.metric("Baixo Risco",  int(exibicao["Classificacao"].astype(str).str.contains("BAIXO",    na=False).sum()))
-            k3.metric("Moderado",     int(exibicao["Classificacao"].astype(str).str.contains("MODERADO", na=False).sum()))
-            k4.metric("Alto Risco",   int(exibicao["Classificacao"].astype(str).str.contains("ALTO",     na=False).sum()))
-
-            st.dataframe(exibicao, use_container_width=True, hide_index=True)
-
-            st.download_button(
-                "⬇ BAIXAR HISTÓRICO PARA BACKUP NO ONEDRIVE",
-                exibicao.to_csv(index=False).encode("utf-8-sig"),
-                file_name=(
-                    "historico_score_vendas_"
-                    + datetime.now(TIMEZONE_BRASILIA).strftime("%Y%m%d_%H%M")
-                    + ".csv"
-                ),
-                mime="text/csv",
-                use_container_width=True,
-            )
+        st.download_button(
+            "⬇ BAIXAR HISTÓRICO PARA BACKUP NO ONEDRIVE",
+            df_filtrado.to_csv(index=False).encode("utf-8-sig"),
+            file_name=(
+                "historico_score_vendas_"
+                + datetime.now(TIMEZONE_BRASILIA).strftime("%Y%m%d_%H%M")
+                + ".csv"
+            ),
+            mime="text/csv",
+            use_container_width=True,
+        )
 
     st.divider()
     st.caption(
-        "V15.0 — Projeto Defensores do Contrato | "
-        "Score SPC exclusivamente do proponente | Histórico administrativo do piloto"
+        "V16.1 — Projeto Defensores do Contrato | "
+        "Score SPC exclusivamente do proponente | Histórico via Neon (PostgreSQL)"
     )
+
+
+# ============================================================
+# PÁGINA: GESTÃO DE USUÁRIOS
+# ============================================================
+if st.session_state.get("pagina_v11") == "Usuários" and is_admin:
+    pagina_gestao_usuarios()
