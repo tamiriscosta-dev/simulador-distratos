@@ -1,5 +1,6 @@
-streamlit>=1.42
+streamlit
 pandas
-openpyxl
 pdfplumber
-supabase>=2.0
+psycopg2-binary
+bcrypt
+openpyxl
